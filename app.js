@@ -4,14 +4,13 @@ const statusEl = document.getElementById('status');
 const overlay = document.getElementById('overlay');
 const houseButtons = document.querySelectorAll('.house-btn');
 
-const W = 1600;
-const H = 900;
-const world = { width: 120, height: 120 };
+const WORLD_W = 120;
+const WORLD_H = 120;
 
 const houseDefs = [
-  { label: 'Cozy Cottage', x: 26, y: 28, w: 18, h: 18, color: '#d8a36b', roof: '#a55a34', door: '#5b3a29' },
-  { label: 'Blue Bungalow', x: 54, y: 28, w: 18, h: 18, color: '#7bb7d7', roof: '#446d91', door: '#4c372d' },
-  { label: 'Lilac Home', x: 82, y: 28, w: 18, h: 18, color: '#b06fd9', roof: '#6f3d9d', door: '#513b29' },
+  { label: 'Cozy Cottage', x: 24, y: 30, w: 20, h: 18, color: '#d8a36b', roof: '#a55a34', door: '#5b3a29' },
+  { label: 'Blue Bungalow', x: 52, y: 30, w: 20, h: 18, color: '#7bb7d7', roof: '#446d91', door: '#4c372d' },
+  { label: 'Lilac Home', x: 80, y: 30, w: 20, h: 18, color: '#b06fd9', roof: '#6f3d9d', door: '#513b29' },
 ];
 
 const npcNames = ['Mina', 'Tori', 'Jun', 'Pip', 'Lio', 'Sora', 'Nori'];
@@ -23,20 +22,20 @@ const npcLines = [
   'The square feels cozy, huh?',
 ];
 
-let state = 'choose';
+let state = 'town';
 let selectedHouse = null;
-let player = { x: 60, y: 74, speed: 0.16 };
+let player = { x: 60, y: 86, speed: 0.12, size: 2.2 };
 let keys = {};
-let npcTalk = '';
 let keyLatch = {};
 let npcs = [];
-let pointerLocked = false;
-let lookOffset = 0;
+let npcTalk = '';
+let worldView = { w: WORLD_W, h: WORLD_H };
+let insideHouse = null;
 let pointerDown = false;
 let lastTouchX = 0;
 let lastTouchY = 0;
-let zoom = 10;
-let houseInterior = null;
+let dragYaw = 0;
+let dragPitch = 0;
 let enteringFlash = 0;
 
 function rand(min, max) { return Math.random() * (max - min) + min; }
@@ -49,19 +48,19 @@ function resize() {
 }
 
 function resetTown() {
+  state = 'town';
   selectedHouse = null;
-  state = 'choose';
-  houseInterior = null;
+  insideHouse = null;
   npcTalk = '';
-  player = { x: 60, y: 74, speed: 0.16 };
-  npcs = Array.from({ length: 4 }, () => ({
+  player = { x: 60, y: 86, speed: 0.12, size: 2.2 };
+  npcs = [{
     name: npcNames[Math.floor(Math.random() * npcNames.length)],
-    x: rand(20, 100),
-    y: rand(48, 100),
-    dx: rand(-0.5, 0.5),
-    dy: rand(-0.5, 0.5),
+    x: 68,
+    y: 84,
+    dx: 0,
+    dy: 0,
     talk: npcLines[Math.floor(Math.random() * npcLines.length)],
-  }));
+  }];
   overlay.classList.remove('hidden');
   statusEl.textContent = 'Choose a house in the square.';
   enteringFlash = 0;
@@ -71,8 +70,9 @@ function enterHouse(index) {
   selectedHouse = index;
   state = 'house';
   overlay.classList.add('hidden');
-  houseInterior = { label: houseDefs[index].label, x: 56, y: 68 };
-  player = { x: 60, y: 72, speed: 0.14 };
+  insideHouse = { label: houseDefs[index].label };
+  player = { x: 16, y: 84, speed: 0.11, size: 2.2 };
+  npcTalk = '';
   statusEl.textContent = `Inside ${houseDefs[index].label}. E to leave.`;
 }
 
@@ -89,7 +89,7 @@ houseButtons.forEach((btn) => {
 });
 
 function getNpcDialogue() {
-  const npc = npcs[Math.floor(Math.random() * npcs.length)];
+  const npc = npcs[0];
   return npc ? `${npc.name}: ${npc.talk}` : '...';
 }
 
@@ -110,67 +110,64 @@ function drawRoundedRect(x, y, w, h, r, fill, stroke = null) {
   }
 }
 
+function drawSprite(x, y, size, color, skin = '#ffd8ba') {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y + size * 1.1, size * 1.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(x, y, size * 1.2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawTown() {
   const cw = canvas.width;
   const ch = canvas.height;
-  const scaleX = cw / world.width;
-  const scaleY = ch / world.height;
-  const scale = Math.min(scaleX, scaleY);
-  const ox = (cw - world.width * scale) / 2;
-  const oy = (ch - world.height * scale) / 2;
+  const scaleX = cw / worldView.w;
+  const scaleY = ch / worldView.h;
+  const scale = Math.min(scaleX, scaleY) * 0.95;
+  const ox = (cw - worldView.w * scale) / 2;
+  const oy = (ch - worldView.h * scale) / 2;
 
   ctx.fillStyle = '#9ad0ff';
   ctx.fillRect(0, 0, cw, ch);
-  ctx.fillStyle = '#e9f4ff';
-  ctx.fillRect(0, 0, cw, ch * 0.36);
-  ctx.fillStyle = '#86bd67';
-  ctx.fillRect(0, ch * 0.36, cw, ch * 0.64);
+  ctx.fillStyle = '#eaf6ff';
+  ctx.fillRect(0, 0, cw, ch * 0.35);
+  ctx.fillStyle = '#83bf67';
+  ctx.fillRect(0, ch * 0.35, cw, ch * 0.65);
 
   ctx.save();
   ctx.translate(ox, oy);
   ctx.scale(scale, scale);
 
-  // town square
-  drawRoundedRect(42, 46, 56, 42, 4, '#d5c9af', '#a79774');
+  // paths
+  ctx.fillStyle = '#d5c9af';
+  ctx.fillRect(42, 52, 56, 32);
+  ctx.fillRect(54, 52, 8, 34);
 
   // houses
   houseDefs.forEach((house) => {
-    drawRoundedRect(house.x, house.y, house.w, house.h, 1.4, house.color, 'rgba(0,0,0,0.16)');
+    drawRoundedRect(house.x, house.y, house.w, house.h, 1.4, house.color, 'rgba(0,0,0,0.18)');
     ctx.fillStyle = house.roof;
     ctx.beginPath();
     ctx.moveTo(house.x - 1, house.y + 2);
-    ctx.lineTo(house.x + house.w / 2, house.y - 5);
+    ctx.lineTo(house.x + house.w / 2, house.y - 6);
     ctx.lineTo(house.x + house.w + 1, house.y + 2);
     ctx.closePath();
     ctx.fill();
     ctx.fillStyle = house.door;
-    ctx.fillRect(house.x + house.w / 2 - 1.4, house.y + house.h - 6, 2.8, 6);
+    ctx.fillRect(house.x + house.w / 2 - 1.5, house.y + house.h - 7, 3, 7);
     ctx.fillStyle = '#dff7ff';
     ctx.fillRect(house.x + 3, house.y + 5, 4, 4);
     ctx.fillRect(house.x + house.w - 7, house.y + 5, 4, 4);
   });
 
-  // NPCs
   npcs.forEach((npc) => {
-    ctx.fillStyle = '#6c4a39';
-    ctx.beginPath();
-    ctx.arc(npc.x, npc.y + 4, 3.2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#f4c7a8';
-    ctx.beginPath();
-    ctx.arc(npc.x, npc.y, 2.5, 0, Math.PI * 2);
-    ctx.fill();
+    drawSprite(npc.x, npc.y, 1.8, '#6c4a39');
   });
 
-  // Player
-  ctx.fillStyle = '#315dff';
-  ctx.beginPath();
-  ctx.arc(player.x, player.y + 4, 3.6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#ffd8ba';
-  ctx.beginPath();
-  ctx.arc(player.x, player.y, 2.8, 0, Math.PI * 2);
-  ctx.fill();
+  drawSprite(player.x, player.y, player.size, '#315dff');
 
   ctx.restore();
 }
@@ -178,37 +175,35 @@ function drawTown() {
 function drawHouseInterior() {
   const cw = canvas.width;
   const ch = canvas.height;
+  const t = (dragYaw * 40) % cw;
+  const wobble = Math.sin(dragPitch * 8) * 6;
+
   ctx.fillStyle = '#d9edf9';
   ctx.fillRect(0, 0, cw, ch);
   ctx.fillStyle = '#f5ddb8';
-  ctx.fillRect(0, ch * 0.62, cw, ch * 0.38);
-
-  // floor boards
+  ctx.fillRect(0, ch * 0.6, cw, ch * 0.4);
   ctx.fillStyle = '#caa36c';
-  for (let y = ch * 0.62; y < ch; y += 46) {
-    ctx.fillRect(0, y, cw, 3);
-  }
-
-  // walls
+  for (let y = ch * 0.6; y < ch; y += 46) ctx.fillRect(0, y, cw, 3);
   drawRoundedRect(cw * 0.08, ch * 0.12, cw * 0.84, ch * 0.52, 16, 'rgba(255,255,255,0.5)', 'rgba(0,0,0,0.12)');
 
-  // furniture
-  drawRoundedRect(cw * 0.18, ch * 0.54, cw * 0.24, ch * 0.13, 18, '#9c6a5d', '#6c443a');
-  drawRoundedRect(cw * 0.56, ch * 0.38, cw * 0.22, ch * 0.18, 12, '#eadfc7', '#b8a68a');
+  // whacky furniture shapes
+  drawRoundedRect(cw * 0.16 + wobble, ch * 0.54, cw * 0.28, ch * 0.12, 20, '#9c6a5d', '#6c443a');
+  drawRoundedRect(cw * 0.19 + wobble, ch * 0.48, cw * 0.08, ch * 0.14, 10, '#b78773', '#6c443a');
+  drawRoundedRect(cw * 0.56, ch * 0.38, cw * 0.20, ch * 0.18, 12, '#eadfc7', '#b8a68a');
   drawRoundedRect(cw * 0.60, ch * 0.56, cw * 0.16, ch * 0.08, 8, '#8f664f', '#5c4230');
-  drawRoundedRect(cw * 0.34, ch * 0.48, cw * 0.09, ch * 0.09, 8, '#6fa86c', '#4f764d');
+  drawRoundedRect(cw * 0.34, ch * 0.46, cw * 0.10, ch * 0.11, 8, '#6fa86c', '#4f764d');
+  ctx.fillStyle = '#5c74d6';
+  ctx.fillRect(cw * 0.72, ch * 0.26, 16, 54);
+  ctx.fillStyle = '#f0f7ff';
+  ctx.fillRect(cw * 0.63, ch * 0.26, 60, 42);
+  ctx.fillStyle = '#f1c16f';
+  ctx.beginPath();
+  ctx.arc(cw * 0.72, ch * 0.28, 20, 0, Math.PI * 2);
+  ctx.fill();
 
-  // player
-  const px = player.x / world.width * cw;
-  const py = player.y / world.height * ch;
-  ctx.fillStyle = '#315dff';
-  ctx.beginPath();
-  ctx.arc(px, py + 14, 12, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#ffd8ba';
-  ctx.beginPath();
-  ctx.arc(px, py, 10, 0, Math.PI * 2);
-  ctx.fill();
+  const px = player.x / worldView.w * cw;
+  const py = player.y / worldView.h * ch;
+  drawSprite(px, py, 12, '#315dff');
 }
 
 function drawFlash() {
@@ -219,12 +214,6 @@ function drawFlash() {
 }
 
 function updateTown() {
-  npcs.forEach((npc) => {
-    npc.x = clamp(npc.x + npc.dx, 18, 102);
-    npc.y = clamp(npc.y + npc.dy, 50, 102);
-    if (npc.x <= 18 || npc.x >= 102) npc.dx *= -1;
-    if (npc.y <= 50 || npc.y >= 102) npc.dy *= -1;
-  });
   const move = { x: 0, y: 0 };
   if (keys.KeyW) move.y -= 1;
   if (keys.KeyS) move.y += 1;
@@ -234,16 +223,21 @@ function updateTown() {
   player.x = clamp(player.x + (move.x / mag) * player.speed * 1.8, 16, 104);
   player.y = clamp(player.y + (move.y / mag) * player.speed * 1.8, 44, 104);
 
+  npcs[0].x += Math.sin(Date.now() / 500) * 0.02;
+  npcs[0].y += Math.cos(Date.now() / 700) * 0.02;
+  npcs[0].x = clamp(npcs[0].x, 24, 96);
+  npcs[0].y = clamp(npcs[0].y, 58, 100);
+
   if (keys.KeyE && !keyLatch.KeyE) {
     keyLatch.KeyE = true;
     const hit = houseDefs.findIndex((h) => Math.hypot(player.x - (h.x + h.w / 2), player.y - (h.y + h.h / 2)) < 8);
     if (hit >= 0) enterHouse(hit);
   }
 
-  const nearby = npcs.find((npc) => Math.hypot(player.x - npc.x, player.y - npc.y) < 8);
+  const nearby = npcs[0] && Math.hypot(player.x - npcs[0].x, player.y - npcs[0].y) < 8;
   if (nearby && keys.KeyN && !keyLatch.KeyN) {
     keyLatch.KeyN = true;
-    npcTalk = `${nearby.name}: ${nearby.talk}`;
+    npcTalk = `${npcs[0].name}: ${npcs[0].talk}`;
     statusEl.textContent = npcTalk;
   } else if (!nearby && !npcTalk) {
     statusEl.textContent = 'Choose a house in the square.';
@@ -275,10 +269,7 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
-canvas.addEventListener('click', () => {
-  pointerLocked = true;
-});
-
+canvas.addEventListener('click', () => { pointerDown = true; });
 canvas.addEventListener('pointerdown', (event) => {
   pointerDown = true;
   lastTouchX = event.clientX;
@@ -287,28 +278,21 @@ canvas.addEventListener('pointerdown', (event) => {
 canvas.addEventListener('pointermove', (event) => {
   if (!pointerDown) return;
   const dx = event.clientX - lastTouchX;
-  if (state === 'town') lookOffset += dx * 0.002;
+  const dy = event.clientY - lastTouchY;
+  if (state === 'town') dragYaw += dx * 0.003;
+  if (state === 'house') dragPitch += dy * 0.003;
   lastTouchX = event.clientX;
   lastTouchY = event.clientY;
 });
 canvas.addEventListener('pointerup', () => { pointerDown = false; });
 
-document.addEventListener('keydown', (event) => {
-  keys[event.code] = true;
-  if (event.code === 'Escape') pointerLocked = false;
-  if (event.code === 'KeyN' && state === 'town') {
-    npcTalk = getNpcDialogue();
-    statusEl.textContent = npcTalk;
-  }
-});
-document.addEventListener('keyup', (event) => {
-  keys[event.code] = false;
-  keyLatch[event.code] = false;
-});
+document.addEventListener('keydown', (event) => { keys[event.code] = true; });
+document.addEventListener('keyup', (event) => { keys[event.code] = false; keyLatch[event.code] = false; });
 
 document.addEventListener('mousemove', (event) => {
-  if (!pointerLocked || state !== 'town') return;
-  lookOffset += event.movementX * 0.002;
+  if (!pointerDown) return;
+  if (state === 'town') dragYaw += event.movementX * 0.002;
+  if (state === 'house') dragPitch += event.movementY * 0.002;
 });
 
 function setupOverlay() {
