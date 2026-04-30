@@ -4,22 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>MorganLife</title>
-    <meta name="description" content="A cozy 2D life sim prototype with house selection, town square, and NPCs." />
+    <meta name="description" content="MorganLife, a tiny 2D life sim prototype." />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <main id="app">
-      <div id="hud">
-        <div>
-          <h1>MorganLife</h1>
-          <p id="status">Choose a house in the square.</p>
-        </div>
-        <div id="controls">WASD to move, mouse/touch to look, click NPC to talk, walk into a door to enter a house.</div>
-        <div id="debugPanel">Loading...</div>
-      </div>
-      <canvas id="game"></canvas>
-
-    </main>
-    <script type="module" src="app.js"></script>
+    <canvas id="game"></canvas>
+    <div id="hud">
+      <div id="title">MorganLife</div>
+      <div id="status">Loading...</div>
+      <div id="debug"></div>
+    </div>
+    <div id="dialogue" class="hidden">
+      <div id="dialogueText"></div>
+      <div id="dialogueOptions"></div>
+    </div>
+    <script src="app.js"></script>
   </body>
 </html>

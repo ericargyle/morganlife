@@ -1,360 +1,200 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
-const debugPanel = document.getElementById('debugPanel');
+const debugEl = document.getElementById('debug');
 const dialogue = document.getElementById('dialogue');
 const dialogueText = document.getElementById('dialogueText');
 const dialogueOptions = document.getElementById('dialogueOptions');
 
-const WORLD_W = 120;
-const WORLD_H = 120;
-
-const houseDefs = [
-  { label: 'Cozy Cottage', x: 24, y: 26, w: 20, h: 20, color: '#d8a36b', roof: '#a55a34', door: '#5b3a29' },
-  { label: 'Blue Bungalow', x: 52, y: 26, w: 20, h: 20, color: '#7bb7d7', roof: '#446d91', door: '#4c372d' },
-  { label: 'Lilac Home', x: 80, y: 26, w: 20, h: 20, color: '#b06fd9', roof: '#6f3d9d', door: '#513b29' },
+const houses = [
+  { x: 180, y: 220, w: 120, h: 100, body: '#d98a5f', roof: '#9f4f2e', door: '#4d2c1f', label: 'House A' },
+  { x: 420, y: 220, w: 120, h: 100, body: '#6bb6d8', roof: '#3e6f92', door: '#2d3c4a', label: 'House B' },
+  { x: 660, y: 220, w: 120, h: 100, body: '#b26bdd', roof: '#6e3e99', door: '#4b2c61', label: 'House C' },
 ];
 
-const npcTemplates = [
-  { name: 'Mina', talk: 'Nice day for a walk.', reply: ['Yep!', 'It is.'] },
-  { name: 'Tori', talk: 'I heard the shop has snacks today.', reply: ['Good to know.', 'Nice.'] },
-  { name: 'Jun', talk: 'This town is quiet, which I like.', reply: ['Same.', 'Me too.'] },
-];
-
-let state = 'town';
-let player = { x: 60, y: 86, speed: 0.14, size: 3.6 };
+const npc = { x: 360, y: 430, w: 34, h: 52, name: 'Mina', talk: 'Hey, want a tour?' };
+const world = { w: 960, h: 540 };
+let player = { x: 120, y: 420, r: 16, speed: 2.2 };
 let keys = {};
-let keyLatch = {};
-let npc = null;
-let npcTalk = '';
-let worldView = { w: WORLD_W, h: WORLD_H };
-let pointerDown = false;
-let dragging = false;
-let lastTouchX = 0;
-let lastTouchY = 0;
-let dragYaw = 0;
-let dragPitch = 0;
-let debugForceVisible = true;
-let enteringFlash = 0;
-let conversationOpen = false;
+let last = performance.now();
+let state = 'town';
 let currentHouse = null;
-let clickedNpc = false;
-
-function rand(min, max) { return Math.random() * (max - min) + min; }
-function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+let conversationOpen = false;
+let clicking = false;
+let dpr = 1;
 
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = Math.floor(canvas.clientWidth * dpr);
-  canvas.height = Math.floor(canvas.clientHeight * dpr);
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.floor(innerWidth * dpr);
+  canvas.height = Math.floor(innerHeight * dpr);
 }
 
-function resetTown() {
-  state = 'town';
-  currentHouse = null;
-  conversationOpen = false;
+function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(x,y,w,h)}
+function circle(x,y,r,c){ctx.fillStyle=c;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill()}
+function line(x1,y1,x2,y2,c,w=4){ctx.strokeStyle=c;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()}
+
+function screenToWorld(mx,my){ return { x: mx * (world.w / canvas.width), y: my * (world.h / canvas.height) }; }
+function worldToScreen(wx,wy){ return { x: wx * (canvas.width / world.w), y: wy * (canvas.height / world.h) }; }
+
+function resetTown(){
+  state='town';
+  currentHouse=null;
+  player={ x:120, y:420, r:16, speed:2.2 };
+  statusEl.textContent='Walk to a door to enter. Click the NPC to talk.';
   dialogue.classList.add('hidden');
-  player = { x: 60, y: 86, speed: 0.14, size: 3.6 };
-  npc = {
-    ...npcTemplates[Math.floor(Math.random() * npcTemplates.length)],
-    x: 68,
-    y: 83,
-    dx: 0.018,
-    dy: 0.012,
-  };
-  statusEl.textContent = 'Walk up to a house door to enter.';
-  debugPanel.style.display = 'block';
-  enteringFlash = 0;
+  conversationOpen=false;
 }
 
-function enterHouse(index) {
-  state = 'house';
-  currentHouse = index;
-  conversationOpen = false;
+function enterHouse(i){
+  state='house';
+  currentHouse=i;
+  player={ x: 220, y: 420, r:16, speed:2.1 };
+  statusEl.textContent=`Inside ${houses[i].label}. Walk to the door to leave.`;
   dialogue.classList.add('hidden');
-  player = { x: 16, y: 84, speed: 0.11, size: 3.6 };
-  statusEl.textContent = `Inside ${houseDefs[index].label}. Walk back out to leave.`;
 }
 
-function leaveHouse() {
-  resetTown();
+function drawBackground(){
+  rect(0,0,canvas.width,canvas.height,'#87c7ff');
+  rect(0,canvas.height*0.45,canvas.width,canvas.height*0.55,'#88c26b');
+  rect(0,canvas.height*0.40,canvas.width,8*dpr,'#d9c39b');
 }
 
-function drawRoundedRect(x, y, w, h, r, fill, stroke = null) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-  ctx.fillStyle = fill;
-  ctx.fill();
-  if (stroke) {
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = 3;
-    ctx.stroke();
-  }
-}
-
-function drawSprite(x, y, size, color, skin = '#ffd8ba') {
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(x, y + size * 1.2, size * 1.8, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.arc(x, y, size * 1.15, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function drawTown() {
-  const cw = canvas.width;
-  const ch = canvas.height;
-  const scaleX = cw / worldView.w;
-  const scaleY = ch / worldView.h;
-  const scale = Math.min(scaleX, scaleY) * 1.2;
-  const ox = (cw - worldView.w * scale) / 2;
-  const oy = (ch - worldView.h * scale) / 2;
-
-  ctx.fillStyle = '#9ad0ff';
-  ctx.fillRect(0, 0, cw, ch);
-  ctx.fillStyle = '#eaf6ff';
-  ctx.fillRect(0, 0, cw, ch * 0.35);
-  ctx.fillStyle = '#83bf67';
-  ctx.fillRect(0, ch * 0.35, cw, ch * 0.65);
-
-  ctx.save();
-  ctx.translate(ox, oy);
-  ctx.scale(scale, scale);
-
-  ctx.fillStyle = '#d5c9af';
-  ctx.fillRect(42, 52, 56, 32);
-  ctx.fillRect(54, 52, 8, 34);
-  ctx.fillStyle = '#a08b6a';
-  ctx.fillRect(42, 84, 56, 2);
-
-  houseDefs.forEach((house) => {
-    drawRoundedRect(house.x, house.y, house.w, house.h, 1.4, house.color, 'rgba(0,0,0,0.18)');
-    ctx.fillStyle = house.roof;
+function drawTown(){
+  drawBackground();
+  houses.forEach((h)=>{
+    const s = worldToScreen(h.x,h.y);
+    const sw = h.w * (canvas.width/world.w);
+    const sh = h.h * (canvas.height/world.h);
+    const sx = s.x, sy = s.y;
+    rect(sx,sy,sw,sh,h.body);
+    ctx.fillStyle = h.roof;
     ctx.beginPath();
-    ctx.moveTo(house.x - 1, house.y + 3);
-    ctx.lineTo(house.x + house.w / 2, house.y - 6);
-    ctx.lineTo(house.x + house.w + 1, house.y + 3);
+    ctx.moveTo(sx-10*dpr, sy+4*dpr);
+    ctx.lineTo(sx+sw/2, sy-28*dpr);
+    ctx.lineTo(sx+sw+10*dpr, sy+4*dpr);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = house.door;
-    ctx.fillRect(house.x + house.w / 2 - 2.5, house.y + house.h - 10, 5, 10);
-    ctx.fillStyle = '#dff7ff';
-    ctx.fillRect(house.x + 3, house.y + 5, 4, 4);
-    ctx.fillRect(house.x + house.w - 7, house.y + 5, 4, 4);
+    rect(sx+sw/2-10*dpr, sy+sh-28*dpr, 20*dpr, 28*dpr, h.door);
+    rect(sx+16*dpr, sy+18*dpr, 18*dpr, 18*dpr, '#f5f0d8');
+    rect(sx+sw-34*dpr, sy+18*dpr, 18*dpr, 18*dpr, '#f5f0d8');
+    ctx.fillStyle='#000'; ctx.font=`${14*dpr}px sans-serif`; ctx.fillText(h.label, sx+10*dpr, sy-6*dpr);
   });
 
-  if (npc) {
-    drawSprite(npc.x, npc.y, 4.5, '#6c4a39');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(npc.x - 1, npc.y - 10, 2, 2);
-  }
-  drawSprite(player.x, player.y, 8, '#315dff');
-  ctx.restore();
+  const ns = worldToScreen(npc.x, npc.y);
+  circle(ns.x, ns.y-14*dpr, 14*dpr, '#f0c48a');
+  rect(ns.x-12*dpr, ns.y-4*dpr, 24*dpr, 30*dpr, '#7f5a44');
+  rect(ns.x-8*dpr, ns.y+26*dpr, 6*dpr, 16*dpr, '#3b2a20');
+  rect(ns.x+2*dpr, ns.y+26*dpr, 6*dpr, 16*dpr, '#3b2a20');
+  circle(ns.x, ns.y+8*dpr, 6*dpr, '#fff');
+  ctx.strokeStyle='#000'; ctx.lineWidth=2*dpr; ctx.strokeRect(ns.x-14*dpr, ns.y-18*dpr, 28*dpr, 48*dpr);
 
-  // fallback overlay markers so something is always visible
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.fillRect(12, canvas.height - 72, 220, 60);
-  ctx.fillStyle = '#fff';
-  ctx.font = '16px sans-serif';
-  ctx.fillText(`player ${player.x.toFixed(1)},${player.y.toFixed(1)}`, 20, canvas.height - 46);
-  if (npc) ctx.fillText(`npc ${npc.name} ${npc.x.toFixed(1)},${npc.y.toFixed(1)}`, 20, canvas.height - 24);
+  const ps = worldToScreen(player.x, player.y);
+  circle(ps.x, ps.y-16*dpr, 16*dpr, '#ffd2a1');
+  rect(ps.x-14*dpr, ps.y-2*dpr, 28*dpr, 34*dpr, '#2f66ff');
+  rect(ps.x-10*dpr, ps.y+32*dpr, 8*dpr, 18*dpr, '#2a2a2a');
+  rect(ps.x+2*dpr, ps.y+32*dpr, 8*dpr, 18*dpr, '#2a2a2a');
 }
 
-function drawHouseInterior() {
-  const cw = canvas.width;
-  const ch = canvas.height;
-  const wobble = Math.sin(dragPitch * 8) * 6;
-
-  ctx.fillStyle = '#d9edf9';
-  ctx.fillRect(0, 0, cw, ch);
-  ctx.fillStyle = '#f5ddb8';
-  ctx.fillRect(0, ch * 0.6, cw, ch * 0.4);
-  ctx.fillStyle = '#caa36c';
-  for (let y = ch * 0.6; y < ch; y += 46) ctx.fillRect(0, y, cw, 3);
-  drawRoundedRect(cw * 0.08, ch * 0.12, cw * 0.84, ch * 0.52, 16, 'rgba(255,255,255,0.5)', 'rgba(0,0,0,0.12)');
-
-  drawRoundedRect(cw * 0.16 + wobble, ch * 0.54, cw * 0.28, ch * 0.12, 20, '#9c6a5d', '#6c443a');
-  drawRoundedRect(cw * 0.19 + wobble, ch * 0.48, cw * 0.08, ch * 0.14, 10, '#b78773', '#6c443a');
-  drawRoundedRect(cw * 0.56, ch * 0.38, cw * 0.20, ch * 0.18, 12, '#eadfc7', '#b8a68a');
-  drawRoundedRect(cw * 0.60, ch * 0.56, cw * 0.16, ch * 0.08, 8, '#8f664f', '#5c4230');
-  drawRoundedRect(cw * 0.34, ch * 0.46, cw * 0.10, ch * 0.11, 8, '#6fa86c', '#4f764d');
-  ctx.fillStyle = '#5c74d6';
-  ctx.fillRect(cw * 0.72, ch * 0.26, 16, 54);
-  ctx.fillStyle = '#f0f7ff';
-  ctx.fillRect(cw * 0.63, ch * 0.26, 60, 42);
-  ctx.fillStyle = '#f1c16f';
+function drawHouse(){
+  drawBackground();
+  const h = houses[currentHouse];
+  const s = worldToScreen(h.x,h.y);
+  const sw = h.w * (canvas.width/world.w);
+  const sh = h.h * (canvas.height/world.h);
+  rect(s.x, s.y, sw, sh, h.body);
+  ctx.fillStyle = h.roof;
   ctx.beginPath();
-  ctx.arc(cw * 0.72, ch * 0.28, 20, 0, Math.PI * 2);
+  ctx.moveTo(s.x-10*dpr, s.y+4*dpr);
+  ctx.lineTo(s.x+sw/2, s.y-28*dpr);
+  ctx.lineTo(s.x+sw+10*dpr, s.y+4*dpr);
+  ctx.closePath();
   ctx.fill();
+  rect(s.x+sw/2-10*dpr, s.y+sh-28*dpr, 20*dpr, 28*dpr, h.door);
 
-  const px = player.x / worldView.w * cw;
-  const py = player.y / worldView.h * ch;
-  drawSprite(px, py, 12, '#315dff');
+  rect(canvas.width*0.15, canvas.height*0.58, canvas.width*0.25, canvas.height*0.12, '#b07b6a');
+  rect(canvas.width*0.44, canvas.height*0.50, canvas.width*0.22, canvas.height*0.18, '#f0e1c1');
+  rect(canvas.width*0.52, canvas.height*0.68, canvas.width*0.13, canvas.height*0.06, '#6a4b3a');
+  rect(canvas.width*0.72, canvas.height*0.30, canvas.width*0.11, canvas.height*0.11, '#5b73d4');
+  circle(canvas.width*0.78, canvas.height*0.26, 30*dpr, '#ffe07b');
+
+  const ps = worldToScreen(player.x, player.y);
+  circle(ps.x, ps.y-16*dpr, 16*dpr, '#ffd2a1');
+  rect(ps.x-14*dpr, ps.y-2*dpr, 28*dpr, 34*dpr, '#2f66ff');
+  rect(ps.x-10*dpr, ps.y+32*dpr, 8*dpr, 18*dpr, '#2a2a2a');
+  rect(ps.x+2*dpr, ps.y+32*dpr, 8*dpr, 18*dpr, '#2a2a2a');
 }
 
-function drawFlash() {
-  if (enteringFlash <= 0) return;
-  ctx.fillStyle = `rgba(255,255,255,${enteringFlash})`;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  enteringFlash = Math.max(0, enteringFlash - 0.02);
-}
-
-function openDialogue() {
-  if (!npc) return;
+function openDialogue(){
   conversationOpen = true;
   dialogueText.textContent = `${npc.name}: ${npc.talk}`;
   dialogueOptions.innerHTML = '';
-  const options = [
-    ['Hi!', 'Nice to meet you.'],
-    ['Bye', 'See you around.'],
-    ['What do you do?', 'Mostly walk around and chat.'],
-  ];
-  options.forEach(([label, response]) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = label;
-    button.addEventListener('click', () => {
-      dialogueText.textContent = `${npc.name}: ${response}`;
-      setTimeout(() => dialogue.classList.add('hidden'), 700);
-    });
-    dialogueOptions.appendChild(button);
+  [['Hi','Hi!'],['Tell me more','Sure.'],['Bye','Later.']].forEach(([label,reply])=>{
+    const b=document.createElement('button');
+    b.textContent=label;
+    b.onclick=()=>{ dialogueText.textContent = `You: ${reply}`; setTimeout(()=>dialogue.classList.add('hidden'),700); };
+    dialogueOptions.appendChild(b);
   });
   dialogue.classList.remove('hidden');
 }
 
-function updateTown() {
-  const move = { x: 0, y: 0 };
-  if (keys.KeyW) move.y -= 1;
-  if (keys.KeyS) move.y += 1;
-  if (keys.KeyA) move.x -= 1;
-  if (keys.KeyD) move.x += 1;
-  const mag = Math.hypot(move.x, move.y) || 1;
-  player.x = clamp(player.x + (move.x / mag) * player.speed * 1.8, 16, 104);
-  player.y = clamp(player.y + (move.y / mag) * player.speed * 1.8, 44, 104);
+function move(dt){
+  let dx=0, dy=0;
+  if (keys.ArrowLeft || keys.KeyA) dx -= 1;
+  if (keys.ArrowRight || keys.KeyD) dx += 1;
+  if (keys.ArrowUp || keys.KeyW) dy -= 1;
+  if (keys.ArrowDown || keys.KeyS) dy += 1;
+  const len = Math.hypot(dx,dy) || 1;
+  dx /= len; dy /= len;
+  player.x += dx * player.speed * dt;
+  player.y += dy * player.speed * dt;
+}
 
-  if (npc) {
-    npc.x = clamp(npc.x + npc.dx, 22, 98);
-    npc.y = clamp(npc.y + npc.dy, 58, 102);
-    if (npc.x <= 22 || npc.x >= 98) npc.dx *= -1;
-    if (npc.y <= 58 || npc.y >= 102) npc.dy *= -1;
-  }
-
-  const hit = houseDefs.findIndex((h) => {
-    const doorX = h.x + h.w / 2;
-    const doorY = h.y + h.h - 6;
-    return Math.abs(player.x - doorX) < 5 && Math.abs(player.y - doorY) < 7;
+function updateTown(dt){
+  move(dt);
+  player.x = Math.max(60, Math.min(world.w-40, player.x));
+  player.y = Math.max(360, Math.min(470, player.y));
+  const nps = worldToScreen(npc.x, npc.y);
+  const ps = worldToScreen(player.x, player.y);
+  if (Math.hypot(ps.x-nps.x, ps.y-nps.y) < 60 && !conversationOpen) statusEl.textContent = 'Click the NPC to talk.';
+  let entered = false;
+  houses.forEach((h,i)=>{
+    const door = { x:h.x+h.w/2-6, y:h.y+h.h-14, w:12, h:14 };
+    if (player.x > door.x && player.x < door.x+door.w && player.y > door.y && player.y < door.y+door.h) entered = i;
   });
-  if (hit >= 0) {
-    statusEl.textContent = `Step into ${houseDefs[hit].label} to enter.`;
-    enterHouse(hit);
-  } else {
-    statusEl.textContent = npcTalk || 'Walk up to a house door to enter.';
-  }
-
-  if (npc && Math.hypot(player.x - npc.x, player.y - npc.y) < 8) {
-    statusEl.textContent = `Click ${npc.name} to chat.`;
-    if (keys.KeyN && !keyLatch.KeyN) {
-      keyLatch.KeyN = true;
-      npcTalk = `${npc.name}: ${npc.talk}`;
-      statusEl.textContent = npcTalk;
-      openDialogue();
-    }
-  }
+  if (entered !== false) enterHouse(entered);
 }
 
-
-function updateHouse() {
-  const move = { x: 0, y: 0 };
-  if (keys.KeyW) move.y -= 1;
-  if (keys.KeyS) move.y += 1;
-  if (keys.KeyA) move.x -= 1;
-  if (keys.KeyD) move.x += 1;
-  const mag = Math.hypot(move.x, move.y) || 1;
-  player.x = clamp(player.x + (move.x / mag) * player.speed * 1.6, 12, 108);
-  player.y = clamp(player.y + (move.y / mag) * player.speed * 1.6, 18, 108);
-  if (keys.KeyE && !keyLatch.KeyE) {
-    keyLatch.KeyE = true;
-    leaveHouse();
-  }
+function updateHouse(dt){
+  move(dt);
+  player.x = Math.max(60, Math.min(world.w-40, player.x));
+  player.y = Math.max(180, Math.min(world.h-40, player.y));
+  const h = houses[currentHouse];
+  const door = { x:h.x+h.w/2-6, y:h.y+h.h-14, w:12, h:14 };
+  if (player.x > door.x && player.x < door.x+door.w && player.y > door.y && player.y < door.y+door.h) resetTown();
 }
 
-function townPointerToWorld(clientX, clientY) {
-  const cw = canvas.width;
-  const ch = canvas.height;
-  const scaleX = cw / worldView.w;
-  const scaleY = ch / worldView.h;
-  const scale = Math.min(scaleX, scaleY) * 1.2;
-  const ox = (cw - worldView.w * scale) / 2;
-  const oy = (ch - worldView.h * scale) / 2;
-  const x = (clientX * (cw / canvas.clientWidth) - ox) / scale;
-  const y = (clientY * (ch / canvas.clientHeight) - oy) / scale;
-  return { x, y };
-}
-
-function handleTownClick(clientX, clientY) {
-  if (state !== 'town') return;
-  const p = townPointerToWorld(clientX, clientY);
-  if (npc && Math.hypot(p.x - npc.x, p.y - npc.y) < 10) {
-    openDialogue();
-    return;
-  }
-  const hit = houseDefs.findIndex((h) => Math.hypot(p.x - (h.x + h.w / 2), p.y - (h.y + h.h / 2)) < 3.5);
-  if (hit >= 0) enterHouse(hit);
-}
-
-function loop() {
-  resize();
-  if (state === 'town') updateTown();
-  else updateHouse();
-  if (state === 'town') drawTown();
-  else drawHouseInterior();
-  drawFlash();
-  debugPanel.textContent = `state=${state} | player=(${player.x.toFixed(1)}, ${player.y.toFixed(1)}) | npc=${npc ? `${npc.name} @ (${npc.x.toFixed(1)}, ${npc.y.toFixed(1)})` : 'none'} | dialogue=${conversationOpen ? 'open' : 'closed'}`;
+function loop(ts){
+  const dt = Math.min(32, ts - last || 16);
+  last = ts;
+  if (state === 'town') updateTown(dt);
+  else updateHouse(dt);
+  if (state === 'town') drawTown(); else drawHouse();
+  const ps = worldToScreen(player.x, player.y);
+  const ns = worldToScreen(npc.x, npc.y);
+  debugEl.textContent = `state:${state} player:${player.x.toFixed(0)},${player.y.toFixed(0)} npc:${npc.x.toFixed(0)},${npc.y.toFixed(0)} pScreen:${ps.x.toFixed(0)},${ps.y.toFixed(0)} nScreen:${ns.x.toFixed(0)},${ns.y.toFixed(0)}`;
   requestAnimationFrame(loop);
 }
 
-canvas.addEventListener('click', (event) => {
-  pointerDown = true;
-  handleTownClick(event.clientX, event.clientY);
-});
-canvas.addEventListener('pointerdown', (event) => {
-  pointerDown = true;
-  dragging = true;
-  lastTouchX = event.clientX;
-  lastTouchY = event.clientY;
-  handleTownClick(event.clientX, event.clientY);
-});
-canvas.addEventListener('pointermove', (event) => {
-  if (!dragging) return;
-  const dx = event.clientX - lastTouchX;
-  const dy = event.clientY - lastTouchY;
-  if (state === 'town') dragYaw += dx * 0.003;
-  if (state === 'house') dragPitch += dy * 0.003;
-  lastTouchX = event.clientX;
-  lastTouchY = event.clientY;
-});
-canvas.addEventListener('pointerup', () => { pointerDown = false; dragging = false; });
-
-document.addEventListener('keydown', (event) => { keys[event.code] = true; });
-document.addEventListener('keyup', (event) => { keys[event.code] = false; keyLatch[event.code] = false; });
-
-document.addEventListener('mousemove', (event) => {
-  if (!pointerDown) return;
-  if (state === 'town') dragYaw += event.movementX * 0.002;
-  if (state === 'house') dragPitch += event.movementY * 0.002;
+canvas.addEventListener('click', (e)=>{
+  const p = screenToWorld(e.clientX*dpr, e.clientY*dpr);
+  const ps = worldToScreen(player.x, player.y);
+  const ns = worldToScreen(npc.x, npc.y);
+  if (state === 'town' && Math.hypot(e.clientX*dpr-ns.x, e.clientY*dpr-ns.y) < 60*dpr) openDialogue();
 });
 
-document.addEventListener('click', (event) => {
-  if (conversationOpen && event.target.closest('#dialogue')) return;
-});
+document.addEventListener('keydown', (e)=>{ keys[e.code] = true; if (e.code === 'Escape') dialogue.classList.add('hidden'); });
+document.addEventListener('keyup', (e)=>{ keys[e.code] = false; });
 
-window.addEventListener('resize', resize);
+resize();
 resetTown();
-loop();
+requestAnimationFrame(loop);
