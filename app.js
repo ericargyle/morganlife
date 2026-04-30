@@ -1,23 +1,28 @@
 const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
 const overlay = document.getElementById('overlay');
 const houseButtons = document.querySelectorAll('.house-btn');
 
-let renderer, scene, camera;
-let world = null;
-let state = 'choose';
-let player = null;
-let selectedHouse = null;
-let npcs = [];
-let keys = {};
-let pointerLocked = false;
-let yaw = 0;
-let pitch = -0.15;
-let pointerDown = false;
-let lastTouchX = 0;
-let lastTouchY = 0;
-let townMap = null;
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa9ddff);
+scene.fog = new THREE.Fog(0xa9ddff, 18, 80);
+
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
+camera.position.set(0, 3, 10);
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x446644, 1.35);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(10, 18, 8);
+sun.castShadow = true;
+scene.add(sun);
+
+const world = new THREE.Group();
+scene.add(world);
 
 const HOUSE_LAYOUTS = [
   { color: 0xd8a36b, roof: 0xa55a34, door: 0x5b3a29, label: 'Cozy Cottage' },
@@ -34,124 +39,34 @@ const NPC_RESPONSES = [
   'The square feels cozy, huh?',
 ];
 
-const rooms = {
-  living: { furniture: ['couch', 'table', 'plant'] },
-  kitchen: { furniture: ['counter', 'fridge', 'stool'] },
-};
+let state = 'choose';
+let selectedHouse = null;
+let player = { x: 0, z: 7, speed: 0.12 };
+let npcs = [];
+let keys = {};
+let pointerLocked = false;
+let yaw = 0;
+let pitch = -0.12;
+let townMap = null;
+let houseScene = null;
+let npcTalk = '';
+
+function rand(min, max) { return Math.random() * (max - min) + min; }
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.floor(canvas.clientWidth * dpr);
   canvas.height = Math.floor(canvas.clientHeight * dpr);
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  camera.aspect = canvas.clientWidth / canvas.clientHeight;
+  camera.updateProjectionMatrix();
 }
 
-function rand(min, max) { return Math.random() * (max - min) + min; }
-function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-function lerp(a, b, t) { return a + (b - a) * t; }
-
-function createHouse(index, x, z) {
-  const def = HOUSE_LAYOUTS[index];
-  return {
-    index,
-    x,
-    z,
-    label: def.label,
-    color: def.color,
-    roof: def.roof,
-    door: def.door,
-    doorOpen: false,
-    scale: 1,
-  };
-}
-
-function resetTown() {
-  selectedHouse = null;
-  npcs = Array.from({ length: 4 }, () => ({
-    name: NPC_NAMES[Math.floor(Math.random() * NPC_NAMES.length)],
-    x: rand(-10, 10),
-    z: rand(-10, 10),
-    dir: rand(0, Math.PI * 2),
-    speed: rand(0.01, 0.03),
-    talk: NPC_RESPONSES[Math.floor(Math.random() * NPC_RESPONSES.length)],
-  }));
-  player = { x: 0, y: 0, z: 7, speed: 0.12 };
-  townMap = {
-    houses: [
-      createHouse(0, -8, -6),
-      createHouse(1, 0, -6),
-      createHouse(2, 8, -6),
-    ],
-    square: true,
-  };
-  state = 'choose';
-  overlay.classList.remove('hidden');
-  statusEl.textContent = 'Choose a house in the square.';
-}
-
-function init3D() {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.shadowMap.enabled = true;
-
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xa8d8ff);
-  scene.fog = new THREE.Fog(0xa8d8ff, 18, 80);
-
-  camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
-  camera.position.set(0, 3, 10);
-
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x446644, 1.35);
-  scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-  sun.position.set(10, 18, 8);
-  sun.castShadow = true;
-  scene.add(sun);
-
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(200, 200),
-    new THREE.MeshStandardMaterial({ color: 0x7bb86d }),
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  const square = new THREE.Mesh(
-    new THREE.PlaneGeometry(24, 24),
-    new THREE.MeshStandardMaterial({ color: 0xc8c3b0 }),
-  );
-  square.rotation.x = -Math.PI / 2;
-  square.position.y = 0.01;
-  square.receiveShadow = true;
-  scene.add(square);
-
-  const grid = new THREE.GridHelper(24, 12, 0x999988, 0xc8c3b0);
-  grid.position.y = 0.02;
-  scene.add(grid);
-
-  const ambient = new THREE.Mesh(
-    new THREE.RingGeometry(4.5, 5.4, 32),
-    new THREE.MeshBasicMaterial({ color: 0xf7e3a1, transparent: true, opacity: 0.18 }),
-  );
-  ambient.rotation.x = -Math.PI / 2;
-  ambient.position.y = 0.03;
-  scene.add(ambient);
-}
-
-function makeNpcMesh(color) {
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.35, 0.45, 1.15, 8),
-    new THREE.MeshStandardMaterial({ color }),
-  );
-  body.castShadow = true;
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.28, 10, 10),
-    new THREE.MeshStandardMaterial({ color: 0xffe0c8 }),
-  );
-  head.position.y = 0.9;
-  const group = new THREE.Group();
-  group.add(body);
-  group.add(head);
-  return group;
+function clearWorld() {
+  while (world.children.length) {
+    world.remove(world.children[0]);
+  }
 }
 
 function makePlayerMesh() {
@@ -170,13 +85,48 @@ function makePlayerMesh() {
   return mesh;
 }
 
-function buildTown() {
-  scene = scene || new THREE.Scene();
-  if (world) scene.remove(world);
-  world = new THREE.Group();
+function makeNpcMesh(color) {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, 0.45, 1.15, 8),
+    new THREE.MeshStandardMaterial({ color }),
+  );
+  body.castShadow = true;
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 10, 10),
+    new THREE.MeshStandardMaterial({ color: 0xffe0c8 }),
+  );
+  head.position.y = 0.9;
+  group.add(body, head);
+  return group;
+}
 
-  const houseData = townMap.houses;
-  houseData.forEach((house) => {
+function buildTown() {
+  clearWorld();
+  scene.background = new THREE.Color(0xa9ddff);
+  scene.fog = new THREE.Fog(0xa9ddff, 18, 80);
+
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(200, 200),
+    new THREE.MeshStandardMaterial({ color: 0x7bb86d }),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  world.add(ground);
+
+  const square = new THREE.Mesh(
+    new THREE.PlaneGeometry(24, 24),
+    new THREE.MeshStandardMaterial({ color: 0xc8c3b0 }),
+  );
+  square.rotation.x = -Math.PI / 2;
+  square.position.y = 0.01;
+  world.add(square);
+
+  const grid = new THREE.GridHelper(24, 12, 0x999988, 0xc8c3b0);
+  grid.position.y = 0.02;
+  world.add(grid);
+
+  townMap.houses.forEach((house) => {
     const base = new THREE.Mesh(
       new THREE.BoxGeometry(3.6, 2.4, 3.2),
       new THREE.MeshStandardMaterial({ color: house.color }),
@@ -211,18 +161,23 @@ function buildTown() {
     world.add(sign);
   });
 
-  scene.add(world);
+  const playerMesh = makePlayerMesh();
+  playerMesh.position.set(player.x, 0, player.z);
+  world.add(playerMesh);
+
+  npcs.forEach((npc) => {
+    const mesh = makeNpcMesh(0xf2b56b);
+    mesh.position.set(npc.x, 0, npc.z);
+    world.add(mesh);
+  });
 }
 
-function enterHouse(index) {
-  selectedHouse = index;
-  state = 'house';
-  overlay.classList.add('hidden');
-  statusEl.textContent = `Inside ${townMap.houses[index].label}. E to leave.`;
+function buildHouse(index) {
+  clearWorld();
+  const house = townMap.houses[index];
   scene.background = new THREE.Color(0xcfe2ff);
   scene.fog = new THREE.Fog(0xcfe2ff, 8, 24);
-  if (world) scene.remove(world);
-  world = new THREE.Group();
+
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(14, 14),
     new THREE.MeshStandardMaterial({ color: 0xd8c7a4 }),
@@ -230,6 +185,16 @@ function enterHouse(index) {
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   world.add(floor);
+
+  const wallA = new THREE.Mesh(new THREE.BoxGeometry(13, 3, 0.4), new THREE.MeshStandardMaterial({ color: 0xf8f1df }));
+  wallA.position.set(0, 1.5, -6.6);
+  world.add(wallA);
+  const wallB = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3, 13), new THREE.MeshStandardMaterial({ color: 0xf8f1df }));
+  wallB.position.set(-6.6, 1.5, 0);
+  world.add(wallB);
+  const wallC = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3, 13), new THREE.MeshStandardMaterial({ color: 0xf8f1df }));
+  wallC.position.set(6.6, 1.5, 0);
+  world.add(wallC);
 
   const couch = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.8, 1.1), new THREE.MeshStandardMaterial({ color: 0x9a6c5e }));
   couch.position.set(-2, 0.4, -2);
@@ -240,27 +205,61 @@ function enterHouse(index) {
   const table = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.08, 8), new THREE.MeshStandardMaterial({ color: 0x8d664e }));
   table.position.set(0, 0.45, 1.4);
   world.add(table);
-  scene.add(world);
+
+  const label = document.createElement('div');
+  label.textContent = house.label;
+  statusEl.textContent = `Inside ${house.label}. E to leave.`;
+}
+
+function resetTown() {
+  selectedHouse = null;
+  townMap = {
+    houses: [
+      { ...HOUSE_LAYOUTS[0], x: -8, z: -6 },
+      { ...HOUSE_LAYOUTS[1], x: 0, z: -6 },
+      { ...HOUSE_LAYOUTS[2], x: 8, z: -6 },
+    ],
+  };
+  npcs = Array.from({ length: 4 }, () => ({
+    name: NPC_NAMES[Math.floor(Math.random() * NPC_NAMES.length)],
+    x: rand(-10, 10),
+    z: rand(-10, 10),
+    dir: rand(0, Math.PI * 2),
+    speed: rand(0.01, 0.03),
+    talk: NPC_RESPONSES[Math.floor(Math.random() * NPC_RESPONSES.length)],
+  }));
+  player = { x: 0, z: 7, speed: 0.12 };
+  state = 'choose';
+  overlay.classList.remove('hidden');
+  statusEl.textContent = 'Choose a house in the square.';
+  buildTown();
+}
+
+function enterHouse(index) {
+  selectedHouse = index;
+  state = 'house';
+  overlay.classList.add('hidden');
+  buildHouse(index);
 }
 
 function leaveHouse() {
   state = 'town';
   statusEl.textContent = 'Walk to a house and press E to enter.';
-  scene.background = new THREE.Color(0xa8d8ff);
-  scene.fog = new THREE.Fog(0xa8d8ff, 18, 80);
-  if (world) scene.remove(world);
   buildTown();
 }
 
 function setupOverlay() {
   houseButtons.forEach((btn) => {
     btn.addEventListener('click', () => {
-      const index = Number(btn.dataset.house);
-      selectedHouse = index;
-      overlay.classList.add('hidden');
-      enterHouse(index);
+      enterHouse(Number(btn.dataset.house));
     });
   });
+}
+
+function getNpcDialogue() {
+  const npc = npcs[Math.floor(Math.random() * npcs.length)];
+  if (!npc) return '...';
+  return `${npc.name}: ${npc.talk}`;
 }
 
 function updatePlayer() {
@@ -272,18 +271,12 @@ function updatePlayer() {
   if (keys.KeyA) move.sub(right);
   if (keys.KeyD) move.add(right);
   if (move.lengthSq() > 0) move.normalize();
-  player.x += move.x * player.speed;
-  player.z += move.z * player.speed;
-  player.x = clamp(player.x, -20, 20);
-  player.z = clamp(player.z, -20, 20);
-  const px = player.x;
-  const pz = player.z;
+  player.x = clamp(player.x + move.x * player.speed, -20, 20);
+  player.z = clamp(player.z + move.z * player.speed, -20, 20);
 
   if (state === 'town') {
     townMap.houses.forEach((house, index) => {
-      const dx = px - house.x;
-      const dz = pz - (house.z + 1.8);
-      const dist = Math.hypot(dx, dz);
+      const dist = Math.hypot(player.x - house.x, player.z - (house.z + 1.8));
       if (dist < 1.1) {
         statusEl.textContent = `Press E to enter ${house.label}.`;
         if (keys.KeyE) enterHouse(index);
@@ -298,17 +291,9 @@ function updateNpcs() {
   if (state !== 'town') return;
   npcs.forEach((npc) => {
     npc.dir += rand(-0.02, 0.02);
-    npc.x += Math.cos(npc.dir) * npc.speed;
-    npc.z += Math.sin(npc.dir) * npc.speed;
-    npc.x = clamp(npc.x, -14, 14);
-    npc.z = clamp(npc.z, -14, 14);
+    npc.x = clamp(npc.x + Math.cos(npc.dir) * npc.speed, -14, 14);
+    npc.z = clamp(npc.z + Math.sin(npc.dir) * npc.speed, -14, 14);
   });
-}
-
-function getNpcDialogue() {
-  const npc = npcs[Math.floor(Math.random() * npcs.length)];
-  if (!npc) return '...';
-  return `${npc.name}: ${npc.talk}`;
 }
 
 function updateCamera() {
@@ -321,25 +306,10 @@ function updateCamera() {
   }
 }
 
-function updateScene() {
-  if (state === 'town') {
-    buildTown();
-    const playerMesh = makePlayerMesh();
-    playerMesh.position.set(player.x, 0, player.z);
-    world.add(playerMesh);
-    npcs.forEach((npc) => {
-      const mesh = makeNpcMesh(0xf2b56b);
-      mesh.position.set(npc.x, 0, npc.z);
-      world.add(mesh);
-    });
-  }
-}
-
 function animate() {
   updatePlayer();
   updateNpcs();
   updateCamera();
-  updateScene();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
@@ -347,16 +317,12 @@ function animate() {
 function syncMouseLook(event) {
   if (!pointerLocked || state !== 'town') return;
   yaw -= event.movementX * 0.0025;
-  pitch -= event.movementY * 0.0025;
-  pitch = clamp(pitch, -0.5, 0.25);
+  pitch = clamp(pitch - event.movementY * 0.0025, -0.5, 0.25);
 }
 
 canvas.addEventListener('click', () => {
-  if (!pointerLocked) {
-    canvas.requestPointerLock?.();
-  }
+  if (!pointerLocked) canvas.requestPointerLock?.();
 });
-
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;
 });
@@ -364,7 +330,8 @@ document.addEventListener('mousemove', syncMouseLook);
 document.addEventListener('keydown', (event) => {
   keys[event.code] = true;
   if (event.code === 'KeyN' && state === 'town') {
-    statusEl.textContent = getNpcDialogue();
+    npcTalk = getNpcDialogue();
+    statusEl.textContent = npcTalk;
   }
 });
 document.addEventListener('keyup', (event) => {
@@ -392,19 +359,10 @@ canvas.addEventListener('touchend', () => { pointerDown = false; }, { passive: t
 
 function start() {
   resize();
-  init3D();
   setupOverlay();
   resetTown();
   animate();
 }
 
-window.addEventListener('resize', () => {
-  resize();
-  if (renderer && camera) {
-    camera.aspect = canvas.width / canvas.height;
-    camera.updateProjectionMatrix();
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-  }
-});
-
+window.addEventListener('resize', resize);
 start();
