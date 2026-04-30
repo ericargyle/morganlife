@@ -1,37 +1,21 @@
 const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
 const overlay = document.getElementById('overlay');
 const houseButtons = document.querySelectorAll('.house-btn');
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.shadowMap.enabled = true;
+const W = 1600;
+const H = 900;
+const world = { width: 120, height: 120 };
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xbfe7ff);
-scene.fog = new THREE.Fog(0xbfe7ff, 18, 80);
-
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
-camera.position.set(0, 6, 12);
-
-const hemi = new THREE.HemisphereLight(0xffffff, 0x456b49, 1.35);
-scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-sun.position.set(8, 18, 8);
-sun.castShadow = true;
-scene.add(sun);
-
-const world = new THREE.Group();
-scene.add(world);
-
-const HOUSE_LAYOUTS = [
-  { color: 0xd8a36b, roof: 0xa55a34, door: 0x5b3a29, label: 'Cozy Cottage' },
-  { color: 0x7bb7d7, roof: 0x446d91, door: 0x4c372d, label: 'Blue Bungalow' },
-  { color: 0xb06fd9, roof: 0x6f3d9d, door: 0x513b29, label: 'Lilac Home' },
+const houseDefs = [
+  { label: 'Cozy Cottage', x: 26, y: 28, w: 18, h: 18, color: '#d8a36b', roof: '#a55a34', door: '#5b3a29' },
+  { label: 'Blue Bungalow', x: 54, y: 28, w: 18, h: 18, color: '#7bb7d7', roof: '#446d91', door: '#4c372d' },
+  { label: 'Lilac Home', x: 82, y: 28, w: 18, h: 18, color: '#b06fd9', roof: '#6f3d9d', door: '#513b29' },
 ];
 
-const NPC_NAMES = ['Mina', 'Tori', 'Jun', 'Pip', 'Lio', 'Sora', 'Nori'];
-const NPC_RESPONSES = [
+const npcNames = ['Mina', 'Tori', 'Jun', 'Pip', 'Lio', 'Sora', 'Nori'];
+const npcLines = [
   'Nice day for a walk.',
   'I heard the shop has snacks today.',
   'This town is quiet, which I like.',
@@ -41,260 +25,298 @@ const NPC_RESPONSES = [
 
 let state = 'choose';
 let selectedHouse = null;
-let player = { x: 0, z: 7, speed: 0.12 };
-let npcs = [];
+let player = { x: 60, y: 74, speed: 0.16 };
 let keys = {};
+let npcTalk = '';
+let npcs = [];
 let pointerLocked = false;
-let yaw = 0;
-let townMap = null;
+let lookOffset = 0;
+let pointerDown = false;
+let lastTouchX = 0;
+let lastTouchY = 0;
+let zoom = 10;
+let houseInterior = null;
+let enteringFlash = 0;
 
 function rand(min, max) { return Math.random() * (max - min) + min; }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-function clearWorld() { while (world.children.length) world.remove(world.children[0]); }
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.floor(canvas.clientWidth * dpr);
   canvas.height = Math.floor(canvas.clientHeight * dpr);
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-  camera.aspect = canvas.clientWidth / canvas.clientHeight;
-  camera.updateProjectionMatrix();
-}
-
-function makePlayerMesh() {
-  const mesh = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 0.6, 4, 8), new THREE.MeshStandardMaterial({ color: 0x5c8cff }));
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 12), new THREE.MeshStandardMaterial({ color: 0xffdfc2 }));
-  body.castShadow = head.castShadow = true;
-  head.position.y = 1;
-  mesh.add(body, head);
-  return mesh;
-}
-
-function makeNpcMesh(color) {
-  const group = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 1.15, 8), new THREE.MeshStandardMaterial({ color }));
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 10), new THREE.MeshStandardMaterial({ color: 0xffe0c8 }));
-  body.castShadow = head.castShadow = true;
-  head.position.y = 0.9;
-  group.add(body, head);
-  return group;
-}
-
-function buildTown() {
-  clearWorld();
-  scene.background = new THREE.Color(0xbfe7ff);
-  scene.fog = new THREE.Fog(0xbfe7ff, 18, 80);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x7bb86d }));
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  world.add(ground);
-  const square = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), new THREE.MeshStandardMaterial({ color: 0xc8c3b0 }));
-  square.rotation.x = -Math.PI / 2;
-  square.position.y = 0.01;
-  world.add(square);
-  const grid = new THREE.GridHelper(24, 12, 0x999988, 0xc8c3b0);
-  grid.position.y = 0.02;
-  world.add(grid);
-  townMap.houses.forEach((house) => {
-    const base = new THREE.Mesh(new THREE.BoxGeometry(3.6, 2.4, 3.2), new THREE.MeshStandardMaterial({ color: house.color }));
-    base.position.set(house.x, 1.2, house.z);
-    base.castShadow = true;
-    base.receiveShadow = true;
-    world.add(base);
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(2.7, 1.4, 4), new THREE.MeshStandardMaterial({ color: house.roof }));
-    roof.position.set(house.x, 2.85, house.z);
-    roof.rotation.y = Math.PI / 4;
-    roof.castShadow = true;
-    world.add(roof);
-    const door = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.0, 0.08), new THREE.MeshStandardMaterial({ color: house.door }));
-    door.position.set(house.x, 0.5, house.z + 1.61);
-    world.add(door);
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 0.5), new THREE.MeshStandardMaterial({ color: 0xfff3cf }));
-    sign.position.set(house.x, 3.7, house.z + 1.65);
-    sign.rotation.y = Math.PI;
-    world.add(sign);
-  });
-  const playerMesh = makePlayerMesh();
-  playerMesh.position.set(player.x, 0, player.z);
-  world.add(playerMesh);
-  npcs.forEach((npc) => {
-    const mesh = makeNpcMesh(0xf2b56b);
-    mesh.position.set(npc.x, 0, npc.z);
-    world.add(mesh);
-  });
-}
-
-function buildHouse(index) {
-  clearWorld();
-  const house = townMap.houses[index];
-  scene.background = new THREE.Color(0xcfe2ff);
-  scene.fog = new THREE.Fog(0xcfe2ff, 8, 24);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshStandardMaterial({ color: 0xd8c7a4 }));
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  world.add(floor);
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0xf8f1df });
-  const wallA = new THREE.Mesh(new THREE.BoxGeometry(13, 3, 0.4), wallMat);
-  wallA.position.set(0, 1.5, -6.6);
-  world.add(wallA);
-  const wallB = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3, 13), wallMat);
-  wallB.position.set(-6.6, 1.5, 0);
-  world.add(wallB);
-  const wallC = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3, 13), wallMat);
-  wallC.position.set(6.6, 1.5, 0);
-  world.add(wallC);
-  const couch = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.8, 1.1), new THREE.MeshStandardMaterial({ color: 0x9a6c5e }));
-  couch.position.set(-2, 0.4, -2);
-  world.add(couch);
-  const kitchen = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.0, 0.8), new THREE.MeshStandardMaterial({ color: 0xe8d5b8 }));
-  kitchen.position.set(2.5, 0.5, -2.5);
-  world.add(kitchen);
-  const table = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.08, 8), new THREE.MeshStandardMaterial({ color: 0x8d664e }));
-  table.position.set(0, 0.45, 1.4);
-  world.add(table);
-  statusEl.textContent = `Inside ${house.label}. E to leave.`;
 }
 
 function resetTown() {
   selectedHouse = null;
-  townMap = { houses: [
-    { ...HOUSE_LAYOUTS[0], x: -8, z: -6 },
-    { ...HOUSE_LAYOUTS[1], x: 0, z: -6 },
-    { ...HOUSE_LAYOUTS[2], x: 8, z: -6 },
-  ] };
-  npcs = Array.from({ length: 4 }, () => ({
-    name: NPC_NAMES[Math.floor(Math.random() * NPC_NAMES.length)],
-    x: rand(-10, 10),
-    z: rand(-10, 10),
-    dir: rand(0, Math.PI * 2),
-    speed: rand(0.01, 0.03),
-    talk: NPC_RESPONSES[Math.floor(Math.random() * NPC_RESPONSES.length)],
-  }));
-  player = { x: 0, z: 7, speed: 0.12 };
   state = 'choose';
+  houseInterior = null;
+  npcTalk = '';
+  player = { x: 60, y: 74, speed: 0.16 };
+  npcs = Array.from({ length: 4 }, () => ({
+    name: npcNames[Math.floor(Math.random() * npcNames.length)],
+    x: rand(20, 100),
+    y: rand(48, 100),
+    dx: rand(-0.5, 0.5),
+    dy: rand(-0.5, 0.5),
+    talk: npcLines[Math.floor(Math.random() * npcLines.length)],
+  }));
   overlay.classList.remove('hidden');
   statusEl.textContent = 'Choose a house in the square.';
-  buildTown();
+  enteringFlash = 0;
 }
 
 function enterHouse(index) {
   selectedHouse = index;
   state = 'house';
   overlay.classList.add('hidden');
-  buildHouse(index);
+  houseInterior = { label: houseDefs[index].label, x: 56, y: 68 };
+  player = { x: 60, y: 72, speed: 0.14 };
+  statusEl.textContent = `Inside ${houseDefs[index].label}. E to leave.`;
 }
 
 function leaveHouse() {
-  state = 'town';
-  statusEl.textContent = 'Walk to a house and press E to enter.';
-  buildTown();
+  resetTown();
 }
 
-function setupOverlay() {
-  houseButtons.forEach((btn) => btn.addEventListener('click', () => enterHouse(Number(btn.dataset.house))));
+function chooseHouseFromOverlay(index) {
+  enterHouse(index);
 }
+
+houseButtons.forEach((btn) => {
+  btn.addEventListener('click', () => chooseHouseFromOverlay(Number(btn.dataset.house)));
+});
 
 function getNpcDialogue() {
   const npc = npcs[Math.floor(Math.random() * npcs.length)];
   return npc ? `${npc.name}: ${npc.talk}` : '...';
 }
 
-function updatePlayer() {
-  const move = new THREE.Vector3();
-  const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).normalize();
-  const right = new THREE.Vector3(forward.z, 0, -forward.x);
-  if (keys.KeyW) move.add(forward);
-  if (keys.KeyS) move.sub(forward);
-  if (keys.KeyA) move.sub(right);
-  if (keys.KeyD) move.add(right);
-  if (move.lengthSq() > 0) move.normalize();
-  player.x = clamp(player.x + move.x * player.speed, -20, 20);
-  player.z = clamp(player.z + move.z * player.speed, -20, 20);
-  if (state === 'town') {
-    townMap.houses.forEach((house, index) => {
-      const dist = Math.hypot(player.x - house.x, player.z - (house.z + 1.8));
-      if (dist < 1.1) {
-        statusEl.textContent = `Press E to enter ${house.label}.`;
-        if (keys.KeyE) enterHouse(index);
-      }
-    });
-  } else if (state === 'house' && keys.KeyE) {
-    leaveHouse();
+function drawRoundedRect(x, y, w, h, r, fill, stroke = null) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 3;
+    ctx.stroke();
   }
 }
 
-function updateNpcs() {
-  if (state !== 'town') return;
-  npcs.forEach((npc) => {
-    npc.dir += (Math.random() - 0.5) * 0.04;
-    npc.x = clamp(npc.x + Math.cos(npc.dir) * npc.speed, -14, 14);
-    npc.z = clamp(npc.z + Math.sin(npc.dir) * npc.speed, -14, 14);
+function drawTown() {
+  const cw = canvas.width;
+  const ch = canvas.height;
+  const scaleX = cw / world.width;
+  const scaleY = ch / world.height;
+  const scale = Math.min(scaleX, scaleY);
+  const ox = (cw - world.width * scale) / 2;
+  const oy = (ch - world.height * scale) / 2;
+
+  ctx.fillStyle = '#9ad0ff';
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.fillStyle = '#e9f4ff';
+  ctx.fillRect(0, 0, cw, ch * 0.36);
+  ctx.fillStyle = '#86bd67';
+  ctx.fillRect(0, ch * 0.36, cw, ch * 0.64);
+
+  ctx.save();
+  ctx.translate(ox, oy);
+  ctx.scale(scale, scale);
+
+  // town square
+  drawRoundedRect(42, 46, 56, 42, 4, '#d5c9af', '#a79774');
+
+  // houses
+  houseDefs.forEach((house) => {
+    drawRoundedRect(house.x, house.y, house.w, house.h, 1.4, house.color, 'rgba(0,0,0,0.16)');
+    ctx.fillStyle = house.roof;
+    ctx.beginPath();
+    ctx.moveTo(house.x - 1, house.y + 2);
+    ctx.lineTo(house.x + house.w / 2, house.y - 5);
+    ctx.lineTo(house.x + house.w + 1, house.y + 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = house.door;
+    ctx.fillRect(house.x + house.w / 2 - 1.4, house.y + house.h - 6, 2.8, 6);
+    ctx.fillStyle = '#dff7ff';
+    ctx.fillRect(house.x + 3, house.y + 5, 4, 4);
+    ctx.fillRect(house.x + house.w - 7, house.y + 5, 4, 4);
   });
+
+  // NPCs
+  npcs.forEach((npc) => {
+    ctx.fillStyle = '#6c4a39';
+    ctx.beginPath();
+    ctx.arc(npc.x, npc.y + 4, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#f4c7a8';
+    ctx.beginPath();
+    ctx.arc(npc.x, npc.y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Player
+  ctx.fillStyle = '#315dff';
+  ctx.beginPath();
+  ctx.arc(player.x, player.y + 4, 3.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffd8ba';
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, 2.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
 }
 
-function updateCamera() {
-  if (state === 'town') {
-    camera.position.set(player.x - Math.sin(yaw) * 4, 3, player.z - Math.cos(yaw) * 4);
-    camera.lookAt(player.x, 1.2, player.z);
-  } else {
-    camera.position.set(0, 5, 8);
-    camera.lookAt(0, 1.3, 0);
+function drawHouseInterior() {
+  const cw = canvas.width;
+  const ch = canvas.height;
+  ctx.fillStyle = '#d9edf9';
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.fillStyle = '#f5ddb8';
+  ctx.fillRect(0, ch * 0.62, cw, ch * 0.38);
+
+  // floor boards
+  ctx.fillStyle = '#caa36c';
+  for (let y = ch * 0.62; y < ch; y += 46) {
+    ctx.fillRect(0, y, cw, 3);
+  }
+
+  // walls
+  drawRoundedRect(cw * 0.08, ch * 0.12, cw * 0.84, ch * 0.52, 16, 'rgba(255,255,255,0.5)', 'rgba(0,0,0,0.12)');
+
+  // furniture
+  drawRoundedRect(cw * 0.18, ch * 0.54, cw * 0.24, ch * 0.13, 18, '#9c6a5d', '#6c443a');
+  drawRoundedRect(cw * 0.56, ch * 0.38, cw * 0.22, ch * 0.18, 12, '#eadfc7', '#b8a68a');
+  drawRoundedRect(cw * 0.60, ch * 0.56, cw * 0.16, ch * 0.08, 8, '#8f664f', '#5c4230');
+  drawRoundedRect(cw * 0.34, ch * 0.48, cw * 0.09, ch * 0.09, 8, '#6fa86c', '#4f764d');
+
+  // player
+  const px = player.x / world.width * cw;
+  const py = player.y / world.height * ch;
+  ctx.fillStyle = '#315dff';
+  ctx.beginPath();
+  ctx.arc(px, py + 14, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffd8ba';
+  ctx.beginPath();
+  ctx.arc(px, py, 10, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawFlash() {
+  if (enteringFlash <= 0) return;
+  ctx.fillStyle = `rgba(255,255,255,${enteringFlash})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  enteringFlash = Math.max(0, enteringFlash - 0.02);
+}
+
+function updateTown() {
+  npcs.forEach((npc) => {
+    npc.x = clamp(npc.x + npc.dx, 18, 102);
+    npc.y = clamp(npc.y + npc.dy, 50, 102);
+    if (npc.x <= 18 || npc.x >= 102) npc.dx *= -1;
+    if (npc.y <= 50 || npc.y >= 102) npc.dy *= -1;
+  });
+  const move = { x: 0, y: 0 };
+  if (keys.KeyW) move.y -= 1;
+  if (keys.KeyS) move.y += 1;
+  if (keys.KeyA) move.x -= 1;
+  if (keys.KeyD) move.x += 1;
+  const mag = Math.hypot(move.x, move.y) || 1;
+  player.x = clamp(player.x + (move.x / mag) * player.speed * 1.8, 16, 104);
+  player.y = clamp(player.y + (move.y / mag) * player.speed * 1.8, 44, 104);
+
+  if (keys.KeyE) {
+    const hit = houseDefs.findIndex((h) => Math.hypot(player.x - (h.x + h.w / 2), player.y - (h.y + h.h / 2)) < 8);
+    if (hit >= 0) enterHouse(hit);
+  }
+
+  const nearby = npcs.find((npc) => Math.hypot(player.x - npc.x, player.y - npc.y) < 8);
+  if (nearby && keys.KeyN) {
+    npcTalk = `${nearby.name}: ${nearby.talk}`;
+    statusEl.textContent = npcTalk;
+  } else if (!nearby && !npcTalk) {
+    statusEl.textContent = 'Choose a house in the square.';
   }
 }
 
-function animate() {
-  updatePlayer();
-  updateNpcs();
-  updateCamera();
-  renderer.render(scene, camera);
-  requestAnimationFrame(animate);
+function updateHouse() {
+  const move = { x: 0, y: 0 };
+  if (keys.KeyW) move.y -= 1;
+  if (keys.KeyS) move.y += 1;
+  if (keys.KeyA) move.x -= 1;
+  if (keys.KeyD) move.x += 1;
+  const mag = Math.hypot(move.x, move.y) || 1;
+  player.x = clamp(player.x + (move.x / mag) * player.speed * 1.6, 12, 108);
+  player.y = clamp(player.y + (move.y / mag) * player.speed * 1.6, 18, 108);
+  if (keys.KeyE) leaveHouse();
 }
 
-function syncMouseLook(event) {
-  if (!pointerLocked || state !== 'town') return;
-  yaw -= event.movementX * 0.0025;
+function loop() {
+  resize();
+  if (state === 'town') updateTown();
+  else updateHouse();
+  if (state === 'town') drawTown();
+  else drawHouseInterior();
+  drawFlash();
+  requestAnimationFrame(loop);
 }
 
 canvas.addEventListener('click', () => {
-  if (!pointerLocked) canvas.requestPointerLock?.();
+  pointerLocked = true;
 });
-document.addEventListener('pointerlockchange', () => {
-  pointerLocked = document.pointerLockElement === canvas;
+
+canvas.addEventListener('pointerdown', (event) => {
+  pointerDown = true;
+  lastTouchX = event.clientX;
+  lastTouchY = event.clientY;
 });
-document.addEventListener('mousemove', syncMouseLook);
+canvas.addEventListener('pointermove', (event) => {
+  if (!pointerDown) return;
+  const dx = event.clientX - lastTouchX;
+  if (state === 'town') lookOffset += dx * 0.002;
+  lastTouchX = event.clientX;
+  lastTouchY = event.clientY;
+});
+canvas.addEventListener('pointerup', () => { pointerDown = false; });
+
 document.addEventListener('keydown', (event) => {
   keys[event.code] = true;
-  if (event.code === 'KeyN' && state === 'town') statusEl.textContent = getNpcDialogue();
+  if (event.code === 'Escape') pointerLocked = false;
+  if (event.code === 'KeyN' && state === 'town') {
+    npcTalk = getNpcDialogue();
+    statusEl.textContent = npcTalk;
+  }
 });
 document.addEventListener('keyup', (event) => {
   keys[event.code] = false;
 });
-canvas.addEventListener('touchstart', (event) => {
-  const touch = event.touches[0];
-  pointerLocked = false;
-  lastTouchX = touch.clientX;
-  lastTouchY = touch.clientY;
-}, { passive: true });
-canvas.addEventListener('touchmove', (event) => {
-  const touch = event.touches[0];
-  const dx = touch.clientX - lastTouchX;
-  const dy = touch.clientY - lastTouchY;
-  lastTouchX = touch.clientX;
-  lastTouchY = touch.clientY;
-  if (state === 'town') {
-    yaw -= dx * 0.004;
-    pitch = clamp(pitch - dy * 0.004, -0.5, 0.25);
-  }
-}, { passive: true });
 
-window.addEventListener('resize', resize);
+document.addEventListener('mousemove', (event) => {
+  if (!pointerLocked || state !== 'town') return;
+  lookOffset += event.movementX * 0.002;
+});
 
-function start() {
-  resize();
-  setupOverlay();
-  resetTown();
-  animate();
+function setupOverlay() {
+  houseButtons.forEach((btn) => btn.addEventListener('click', () => {
+    selectedHouse = Number(btn.dataset.house);
+    overlay.classList.add('hidden');
+    enterHouse(selectedHouse);
+  }));
 }
 
+function start() {
+  setupOverlay();
+  resetTown();
+  loop();
+}
+
+window.addEventListener('resize', resize);
 start();
