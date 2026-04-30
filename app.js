@@ -35,6 +35,7 @@ let dragPitch = 0;
 let enteringFlash = 0;
 let conversationOpen = false;
 let currentDialogue = null;
+let currentHouse = null;
 
 function rand(min, max) { return Math.random() * (max - min) + min; }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -47,6 +48,7 @@ function resize() {
 
 function resetTown() {
   state = 'town';
+  currentHouse = null;
   npcTalk = '';
   conversationOpen = false;
   currentDialogue = null;
@@ -65,6 +67,7 @@ function resetTown() {
 
 function enterHouse(index) {
   state = 'house';
+  currentHouse = index;
   dialogue.classList.add('hidden');
   player = { x: 16, y: 84, speed: 0.11, size: 2.2 };
   statusEl.textContent = `Inside ${houseDefs[index].label}. E to leave.`;
@@ -253,6 +256,32 @@ function updateTown() {
     openDialogue();
   }
 }
+
+
+function townPointerToWorld(clientX, clientY) {
+  const cw = canvas.width;
+  const ch = canvas.height;
+  const scaleX = cw / worldView.w;
+  const scaleY = ch / worldView.h;
+  const scale = Math.min(scaleX, scaleY) * 0.95;
+  const ox = (cw - worldView.w * scale) / 2;
+  const oy = (ch - worldView.h * scale) / 2;
+  const x = (clientX * (cw / canvas.clientWidth) - ox) / scale;
+  const y = (clientY * (ch / canvas.clientHeight) - oy) / scale;
+  return { x, y };
+}
+
+function handleTownClick(clientX, clientY) {
+  if (state !== 'town') return;
+  const p = townPointerToWorld(clientX, clientY);
+  if (npc && Math.hypot(p.x - npc.x, p.y - npc.y) < 8) {
+    openDialogue();
+    return;
+  }
+  const hit = houseDefs.findIndex((h) => Math.hypot(p.x - (h.x + h.w / 2), p.y - (h.y + h.h / 2)) < 3.5);
+  if (hit >= 0) enterHouse(hit);
+}
+
 function updateHouse() {
   const move = { x: 0, y: 0 };
   if (keys.KeyW) move.y -= 1;
