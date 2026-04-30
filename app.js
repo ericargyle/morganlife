@@ -34,6 +34,7 @@ let lastTouchX = 0;
 let lastTouchY = 0;
 let dragYaw = 0;
 let dragPitch = 0;
+let debugForceVisible = true;
 let enteringFlash = 0;
 let conversationOpen = false;
 let currentHouse = null;
@@ -62,6 +63,7 @@ function resetTown() {
     dy: 0.012,
   };
   statusEl.textContent = 'Walk up to a house door to enter.';
+  debugPanel.style.display = 'block';
   enteringFlash = 0;
 }
 
@@ -111,7 +113,7 @@ function drawTown() {
   const ch = canvas.height;
   const scaleX = cw / worldView.w;
   const scaleY = ch / worldView.h;
-  const scale = Math.min(scaleX, scaleY) * 1.05;
+  const scale = Math.min(scaleX, scaleY) * 1.2;
   const ox = (cw - worldView.w * scale) / 2;
   const oy = (ch - worldView.h * scale) / 2;
 
@@ -142,21 +144,27 @@ function drawTown() {
     ctx.closePath();
     ctx.fill();
     ctx.fillStyle = house.door;
-    ctx.fillRect(house.x + house.w / 2 - 1.5, house.y + house.h - 7, 3, 7);
+    ctx.fillRect(house.x + house.w / 2 - 2.5, house.y + house.h - 10, 5, 10);
     ctx.fillStyle = '#dff7ff';
     ctx.fillRect(house.x + 3, house.y + 5, 4, 4);
     ctx.fillRect(house.x + house.w - 7, house.y + 5, 4, 4);
   });
 
   if (npc) {
-    drawSprite(npc.x, npc.y, 1.9, '#6c4a39');
-    ctx.strokeStyle = '#ffe5b2';
-    ctx.beginPath();
-    ctx.arc(npc.x, npc.y, 5, 0, Math.PI * 2);
-    ctx.stroke();
+    drawSprite(npc.x, npc.y, 4.5, '#6c4a39');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(npc.x - 1, npc.y - 10, 2, 2);
   }
-  drawSprite(player.x, player.y, player.size, '#315dff');
+  drawSprite(player.x, player.y, 8, '#315dff');
   ctx.restore();
+
+  // fallback overlay markers so something is always visible
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(12, canvas.height - 72, 220, 60);
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px sans-serif';
+  ctx.fillText(`player ${player.x.toFixed(1)},${player.y.toFixed(1)}`, 20, canvas.height - 46);
+  if (npc) ctx.fillText(`npc ${npc.name} ${npc.x.toFixed(1)},${npc.y.toFixed(1)}`, 20, canvas.height - 24);
 }
 
 function drawHouseInterior() {
@@ -240,8 +248,8 @@ function updateTown() {
 
   const hit = houseDefs.findIndex((h) => {
     const doorX = h.x + h.w / 2;
-    const doorY = h.y + h.h - 1;
-    return Math.abs(player.x - doorX) < 2.5 && Math.abs(player.y - doorY) < 2.5;
+    const doorY = h.y + h.h - 6;
+    return Math.abs(player.x - doorX) < 5 && Math.abs(player.y - doorY) < 7;
   });
   if (hit >= 0) {
     statusEl.textContent = `Step into ${houseDefs[hit].label} to enter.`;
@@ -282,7 +290,7 @@ function townPointerToWorld(clientX, clientY) {
   const ch = canvas.height;
   const scaleX = cw / worldView.w;
   const scaleY = ch / worldView.h;
-  const scale = Math.min(scaleX, scaleY) * 1.05;
+  const scale = Math.min(scaleX, scaleY) * 1.2;
   const ox = (cw - worldView.w * scale) / 2;
   const oy = (ch - worldView.h * scale) / 2;
   const x = (clientX * (cw / canvas.clientWidth) - ox) / scale;
