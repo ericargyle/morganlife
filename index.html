@@ -14,7 +14,7 @@
           <h1>MorganLife</h1>
           <p id="status">Choose a house in the square.</p>
         </div>
-        <div id="controls">WASD to move, mouse/touch to look, E to interact.</div>
+        <div id="controls">WASD to move, mouse/touch to look, click NPC to talk, E to enter doors.</div>
       </div>
       <canvas id="game"></canvas>
       <div id="overlay" class="overlay hidden">
@@ -28,8 +28,13 @@
           </div>
         </div>
       </div>
+      <div id="dialogue" class="dialogue hidden">
+        <div class="dialogue-card">
+          <div id="dialogueText" class="dialogue-text"></div>
+          <div id="dialogueOptions" class="dialogue-options"></div>
+        </div>
+      </div>
     </main>
-    <script src="https://unpkg.com/three@0.164.1/build/three.min.js"></script>
     <script type="module" src="app.js"></script>
   </body>
 </html>
