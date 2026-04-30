@@ -1,9 +1,2 @@
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#87c7ff;font-family:system-ui,sans-serif}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#87c7ff}
 #game{display:block;width:100vw;height:100vh}
-#hud{position:absolute;left:10px;top:10px;z-index:5;color:#fff;text-shadow:0 2px 0 #000;font-weight:700}
-#title{font-size:24px}
-#status,#debug{font-size:14px;margin-top:4px}
-#dialogue{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:10;background:#fff;border:3px solid #000;border-radius:12px;padding:12px;min-width:280px;max-width:80vw}
-#dialogue.hidden{display:none}
-#dialogueOptions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-#dialogueOptions button{padding:8px 10px;border:2px solid #000;background:#ffd86b;border-radius:8px;font-weight:700}
