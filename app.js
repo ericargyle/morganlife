@@ -98,11 +98,11 @@ function drawRoundedRect(x, y, w, h, r, fill, stroke = null) {
 function drawSprite(x, y, size, color, skin = '#ffd8ba') {
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.arc(x, y + size * 1.1, size * 1.6, 0, Math.PI * 2);
+  ctx.arc(x, y + size * 1.2, size * 1.8, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = skin;
   ctx.beginPath();
-  ctx.arc(x, y, size * 1.2, 0, Math.PI * 2);
+  ctx.arc(x, y, size * 1.15, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -111,7 +111,7 @@ function drawTown() {
   const ch = canvas.height;
   const scaleX = cw / worldView.w;
   const scaleY = ch / worldView.h;
-  const scale = Math.min(scaleX, scaleY) * 0.95;
+  const scale = Math.min(scaleX, scaleY) * 1.05;
   const ox = (cw - worldView.w * scale) / 2;
   const oy = (ch - worldView.h * scale) / 2;
 
@@ -129,6 +129,8 @@ function drawTown() {
   ctx.fillStyle = '#d5c9af';
   ctx.fillRect(42, 52, 56, 32);
   ctx.fillRect(54, 52, 8, 34);
+  ctx.fillStyle = '#a08b6a';
+  ctx.fillRect(42, 84, 56, 2);
 
   houseDefs.forEach((house) => {
     drawRoundedRect(house.x, house.y, house.w, house.h, 1.4, house.color, 'rgba(0,0,0,0.18)');
@@ -146,7 +148,13 @@ function drawTown() {
     ctx.fillRect(house.x + house.w - 7, house.y + 5, 4, 4);
   });
 
-  if (npc) drawSprite(npc.x, npc.y, 1.9, '#6c4a39');
+  if (npc) {
+    drawSprite(npc.x, npc.y, 1.9, '#6c4a39');
+    ctx.strokeStyle = '#ffe5b2';
+    ctx.beginPath();
+    ctx.arc(npc.x, npc.y, 5, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   drawSprite(player.x, player.y, player.size, '#315dff');
   ctx.restore();
 }
@@ -230,24 +238,29 @@ function updateTown() {
     if (npc.y <= 58 || npc.y >= 102) npc.dy *= -1;
   }
 
-  const hit = houseDefs.findIndex((h) => Math.hypot(player.x - (h.x + h.w / 2), player.y - (h.y + h.h / 2)) < 3.5);
+  const hit = houseDefs.findIndex((h) => {
+    const doorX = h.x + h.w / 2;
+    const doorY = h.y + h.h - 1;
+    return Math.abs(player.x - doorX) < 2.5 && Math.abs(player.y - doorY) < 2.5;
+  });
   if (hit >= 0) {
     statusEl.textContent = `Step into ${houseDefs[hit].label} to enter.`;
-    if (keys.KeyE && !keyLatch.KeyE) {
-      keyLatch.KeyE = true;
-      enterHouse(hit);
-    }
+    enterHouse(hit);
   } else {
     statusEl.textContent = npcTalk || 'Walk up to a house door to enter.';
   }
 
-  if (npc && Math.hypot(player.x - npc.x, player.y - npc.y) < 8 && keys.KeyN && !keyLatch.KeyN) {
-    keyLatch.KeyN = true;
-    npcTalk = `${npc.name}: ${npc.talk}`;
-    statusEl.textContent = npcTalk;
-    openDialogue();
+  if (npc && Math.hypot(player.x - npc.x, player.y - npc.y) < 8) {
+    statusEl.textContent = `Click ${npc.name} to chat.`;
+    if (keys.KeyN && !keyLatch.KeyN) {
+      keyLatch.KeyN = true;
+      npcTalk = `${npc.name}: ${npc.talk}`;
+      statusEl.textContent = npcTalk;
+      openDialogue();
+    }
   }
 }
+
 
 function updateHouse() {
   const move = { x: 0, y: 0 };
@@ -269,7 +282,7 @@ function townPointerToWorld(clientX, clientY) {
   const ch = canvas.height;
   const scaleX = cw / worldView.w;
   const scaleY = ch / worldView.h;
-  const scale = Math.min(scaleX, scaleY) * 0.95;
+  const scale = Math.min(scaleX, scaleY) * 1.05;
   const ox = (cw - worldView.w * scale) / 2;
   const oy = (ch - worldView.h * scale) / 2;
   const x = (clientX * (cw / canvas.clientWidth) - ox) / scale;
@@ -280,7 +293,7 @@ function townPointerToWorld(clientX, clientY) {
 function handleTownClick(clientX, clientY) {
   if (state !== 'town') return;
   const p = townPointerToWorld(clientX, clientY);
-  if (npc && Math.hypot(p.x - npc.x, p.y - npc.y) < 8) {
+  if (npc && Math.hypot(p.x - npc.x, p.y - npc.y) < 10) {
     openDialogue();
     return;
   }
