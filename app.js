@@ -1,6 +1,7 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
+const debugPanel = document.getElementById('debugPanel');
 const dialogue = document.getElementById('dialogue');
 const dialogueText = document.getElementById('dialogueText');
 const dialogueOptions = document.getElementById('dialogueOptions');
@@ -21,21 +22,22 @@ const npcTemplates = [
 ];
 
 let state = 'town';
-let player = { x: 60, y: 86, speed: 0.12, size: 2.2 };
+let player = { x: 60, y: 86, speed: 0.14, size: 3.6 };
 let keys = {};
 let keyLatch = {};
 let npc = null;
 let npcTalk = '';
 let worldView = { w: WORLD_W, h: WORLD_H };
 let pointerDown = false;
+let dragging = false;
 let lastTouchX = 0;
 let lastTouchY = 0;
 let dragYaw = 0;
 let dragPitch = 0;
 let enteringFlash = 0;
 let conversationOpen = false;
-let currentDialogue = null;
 let currentHouse = null;
+let clickedNpc = false;
 
 function rand(min, max) { return Math.random() * (max - min) + min; }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -49,17 +51,15 @@ function resize() {
 function resetTown() {
   state = 'town';
   currentHouse = null;
-  npcTalk = '';
   conversationOpen = false;
-  currentDialogue = null;
   dialogue.classList.add('hidden');
-  player = { x: 60, y: 86, speed: 0.12, size: 2.2 };
+  player = { x: 60, y: 86, speed: 0.14, size: 3.6 };
   npc = {
     ...npcTemplates[Math.floor(Math.random() * npcTemplates.length)],
-    x: 66,
-    y: 84,
-    dx: 0.02,
-    dy: 0,
+    x: 68,
+    y: 83,
+    dx: 0.018,
+    dy: 0.012,
   };
   statusEl.textContent = 'Walk up to a house door to enter.';
   enteringFlash = 0;
@@ -68,9 +68,10 @@ function resetTown() {
 function enterHouse(index) {
   state = 'house';
   currentHouse = index;
+  conversationOpen = false;
   dialogue.classList.add('hidden');
-  player = { x: 16, y: 84, speed: 0.11, size: 2.2 };
-  statusEl.textContent = `Inside ${houseDefs[index].label}. E to leave.`;
+  player = { x: 16, y: 84, speed: 0.11, size: 3.6 };
+  statusEl.textContent = `Inside ${houseDefs[index].label}. Walk back out to leave.`;
 }
 
 function leaveHouse() {
@@ -145,7 +146,7 @@ function drawTown() {
     ctx.fillRect(house.x + house.w - 7, house.y + 5, 4, 4);
   });
 
-  if (npc) drawSprite(npc.x, npc.y, 1.8, '#6c4a39');
+  if (npc) drawSprite(npc.x, npc.y, 1.9, '#6c4a39');
   drawSprite(player.x, player.y, player.size, '#315dff');
   ctx.restore();
 }
@@ -192,35 +193,24 @@ function drawFlash() {
 function openDialogue() {
   if (!npc) return;
   conversationOpen = true;
-  currentDialogue = {
-    text: `${npc.name}: ${npc.talk}`,
-    options: [
-      { label: 'Hi!', response: 'Nice to meet you.' },
-      { label: 'Bye', response: 'See you around.' },
-      { label: 'What do you do?', response: 'Mostly walk around and chat.' },
-    ],
-  };
-  dialogueText.textContent = currentDialogue.text;
+  dialogueText.textContent = `${npc.name}: ${npc.talk}`;
   dialogueOptions.innerHTML = '';
-  currentDialogue.options.forEach((opt) => {
+  const options = [
+    ['Hi!', 'Nice to meet you.'],
+    ['Bye', 'See you around.'],
+    ['What do you do?', 'Mostly walk around and chat.'],
+  ];
+  options.forEach(([label, response]) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = opt.label;
+    button.textContent = label;
     button.addEventListener('click', () => {
-      dialogueText.textContent = `${npc.name}: ${opt.response}`;
-      setTimeout(() => {
-        dialogue.classList.add('hidden');
-        conversationOpen = false;
-      }, 650);
+      dialogueText.textContent = `${npc.name}: ${response}`;
+      setTimeout(() => dialogue.classList.add('hidden'), 700);
     });
     dialogueOptions.appendChild(button);
   });
   dialogue.classList.remove('hidden');
-}
-
-function closeDialogue() {
-  conversationOpen = false;
-  dialogue.classList.add('hidden');
 }
 
 function updateTown() {
@@ -253,10 +243,26 @@ function updateTown() {
 
   if (npc && Math.hypot(player.x - npc.x, player.y - npc.y) < 8 && keys.KeyN && !keyLatch.KeyN) {
     keyLatch.KeyN = true;
+    npcTalk = `${npc.name}: ${npc.talk}`;
+    statusEl.textContent = npcTalk;
     openDialogue();
   }
 }
 
+function updateHouse() {
+  const move = { x: 0, y: 0 };
+  if (keys.KeyW) move.y -= 1;
+  if (keys.KeyS) move.y += 1;
+  if (keys.KeyA) move.x -= 1;
+  if (keys.KeyD) move.x += 1;
+  const mag = Math.hypot(move.x, move.y) || 1;
+  player.x = clamp(player.x + (move.x / mag) * player.speed * 1.6, 12, 108);
+  player.y = clamp(player.y + (move.y / mag) * player.speed * 1.6, 18, 108);
+  if (keys.KeyE && !keyLatch.KeyE) {
+    keyLatch.KeyE = true;
+    leaveHouse();
+  }
+}
 
 function townPointerToWorld(clientX, clientY) {
   const cw = canvas.width;
@@ -282,21 +288,6 @@ function handleTownClick(clientX, clientY) {
   if (hit >= 0) enterHouse(hit);
 }
 
-function updateHouse() {
-  const move = { x: 0, y: 0 };
-  if (keys.KeyW) move.y -= 1;
-  if (keys.KeyS) move.y += 1;
-  if (keys.KeyA) move.x -= 1;
-  if (keys.KeyD) move.x += 1;
-  const mag = Math.hypot(move.x, move.y) || 1;
-  player.x = clamp(player.x + (move.x / mag) * player.speed * 1.6, 12, 108);
-  player.y = clamp(player.y + (move.y / mag) * player.speed * 1.6, 18, 108);
-  if (keys.KeyE && !keyLatch.KeyE) {
-    keyLatch.KeyE = true;
-    leaveHouse();
-  }
-}
-
 function loop() {
   resize();
   if (state === 'town') updateTown();
@@ -304,28 +295,23 @@ function loop() {
   if (state === 'town') drawTown();
   else drawHouseInterior();
   drawFlash();
+  debugPanel.textContent = `state=${state} | player=(${player.x.toFixed(1)}, ${player.y.toFixed(1)}) | npc=${npc ? `${npc.name} @ (${npc.x.toFixed(1)}, ${npc.y.toFixed(1)})` : 'none'} | dialogue=${conversationOpen ? 'open' : 'closed'}`;
   requestAnimationFrame(loop);
 }
 
+canvas.addEventListener('click', (event) => {
+  pointerDown = true;
+  handleTownClick(event.clientX, event.clientY);
+});
 canvas.addEventListener('pointerdown', (event) => {
   pointerDown = true;
+  dragging = true;
   lastTouchX = event.clientX;
   lastTouchY = event.clientY;
-  if (state === 'town') {
-    const sx = canvas.width / worldView.w;
-    const sy = canvas.height / worldView.h;
-    const scale = Math.min(sx, sy) * 0.95;
-    const ox = (canvas.width - worldView.w * scale) / 2;
-    const oy = (canvas.height - worldView.h * scale) / 2;
-    const wx = (event.clientX * (canvas.width / canvas.clientWidth) - ox) / scale;
-    const wy = (event.clientY * (canvas.height / canvas.clientHeight) - oy) / scale;
-    if (npc && Math.hypot(wx - npc.x, wy - npc.y) < 8) {
-      openDialogue();
-    }
-  }
+  handleTownClick(event.clientX, event.clientY);
 });
 canvas.addEventListener('pointermove', (event) => {
-  if (!pointerDown) return;
+  if (!dragging) return;
   const dx = event.clientX - lastTouchX;
   const dy = event.clientY - lastTouchY;
   if (state === 'town') dragYaw += dx * 0.003;
@@ -333,19 +319,10 @@ canvas.addEventListener('pointermove', (event) => {
   lastTouchX = event.clientX;
   lastTouchY = event.clientY;
 });
-canvas.addEventListener('pointerup', () => { pointerDown = false; });
+canvas.addEventListener('pointerup', () => { pointerDown = false; dragging = false; });
 
-document.addEventListener('keydown', (event) => {
-  keys[event.code] = true;
-  if (event.code === 'Escape') {
-    pointerDown = false;
-    closeDialogue();
-  }
-});
-document.addEventListener('keyup', (event) => {
-  keys[event.code] = false;
-  keyLatch[event.code] = false;
-});
+document.addEventListener('keydown', (event) => { keys[event.code] = true; });
+document.addEventListener('keyup', (event) => { keys[event.code] = false; keyLatch[event.code] = false; });
 
 document.addEventListener('mousemove', (event) => {
   if (!pointerDown) return;
@@ -353,17 +330,10 @@ document.addEventListener('mousemove', (event) => {
   if (state === 'house') dragPitch += event.movementY * 0.002;
 });
 
-function setupOverlay() {
-  houseButtons.forEach((btn) => btn.addEventListener('click', () => {
-    selectedHouse = Number(btn.dataset.house);
-      enterHouse(selectedHouse);
-  }));
-}
-
-function start() {
-  resetTown();
-  loop();
-}
+document.addEventListener('click', (event) => {
+  if (conversationOpen && event.target.closest('#dialogue')) return;
+});
 
 window.addEventListener('resize', resize);
-start();
+resetTown();
+loop();
