@@ -1,8 +1,6 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
-const overlay = document.getElementById('overlay');
-const houseButtons = document.querySelectorAll('.house-btn');
 const dialogue = document.getElementById('dialogue');
 const dialogueText = document.getElementById('dialogueText');
 const dialogueOptions = document.getElementById('dialogueOptions');
@@ -23,7 +21,6 @@ const npcTemplates = [
 ];
 
 let state = 'town';
-let selectedHouse = null;
 let player = { x: 60, y: 86, speed: 0.12, size: 2.2 };
 let keys = {};
 let keyLatch = {};
@@ -50,7 +47,6 @@ function resize() {
 
 function resetTown() {
   state = 'town';
-  selectedHouse = null;
   npcTalk = '';
   conversationOpen = false;
   currentDialogue = null;
@@ -63,15 +59,12 @@ function resetTown() {
     dx: 0.02,
     dy: 0,
   };
-  overlay.classList.remove('hidden');
-  statusEl.textContent = 'Choose a house in the square.';
+  statusEl.textContent = 'Walk up to a house door to enter.';
   enteringFlash = 0;
 }
 
 function enterHouse(index) {
-  selectedHouse = index;
   state = 'house';
-  overlay.classList.add('hidden');
   dialogue.classList.add('hidden');
   player = { x: 16, y: 84, speed: 0.11, size: 2.2 };
   statusEl.textContent = `Inside ${houseDefs[index].label}. E to leave.`;
@@ -212,6 +205,10 @@ function openDialogue() {
     button.textContent = opt.label;
     button.addEventListener('click', () => {
       dialogueText.textContent = `${npc.name}: ${opt.response}`;
+      setTimeout(() => {
+        dialogue.classList.add('hidden');
+        conversationOpen = false;
+      }, 650);
     });
     dialogueOptions.appendChild(button);
   });
@@ -240,23 +237,22 @@ function updateTown() {
     if (npc.y <= 58 || npc.y >= 102) npc.dy *= -1;
   }
 
-  if (keys.KeyE && !keyLatch.KeyE) {
-    keyLatch.KeyE = true;
-    const hit = houseDefs.findIndex((h) => Math.hypot(player.x - (h.x + h.w / 2), player.y - (h.y + h.h / 2)) < 8);
-    if (hit >= 0) enterHouse(hit);
+  const hit = houseDefs.findIndex((h) => Math.hypot(player.x - (h.x + h.w / 2), player.y - (h.y + h.h / 2)) < 3.5);
+  if (hit >= 0) {
+    statusEl.textContent = `Step into ${houseDefs[hit].label} to enter.`;
+    if (keys.KeyE && !keyLatch.KeyE) {
+      keyLatch.KeyE = true;
+      enterHouse(hit);
+    }
+  } else {
+    statusEl.textContent = npcTalk || 'Walk up to a house door to enter.';
   }
 
-  if (keys.KeyN && npc && Math.hypot(player.x - npc.x, player.y - npc.y) < 10 && !keyLatch.KeyN) {
+  if (npc && Math.hypot(player.x - npc.x, player.y - npc.y) < 8 && keys.KeyN && !keyLatch.KeyN) {
     keyLatch.KeyN = true;
-    npcTalk = `${npc.name}: ${npc.talk}`;
-    statusEl.textContent = npcTalk;
-  }
-
-  if (npc && Math.hypot(player.x - npc.x, player.y - npc.y) < 8 && pointerDown) {
     openDialogue();
   }
 }
-
 function updateHouse() {
   const move = { x: 0, y: 0 };
   if (keys.KeyW) move.y -= 1;
@@ -331,13 +327,11 @@ document.addEventListener('mousemove', (event) => {
 function setupOverlay() {
   houseButtons.forEach((btn) => btn.addEventListener('click', () => {
     selectedHouse = Number(btn.dataset.house);
-    overlay.classList.add('hidden');
-    enterHouse(selectedHouse);
+      enterHouse(selectedHouse);
   }));
 }
 
 function start() {
-  setupOverlay();
   resetTown();
   loop();
 }
