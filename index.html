@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>MorganLife</title>
+    <meta name="description" content="A cozy Nintendo-ish life sim prototype with house selection, town square, and NPCs." />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main id="app">
+      <div id="hud">
+        <div>
+          <h1>MorganLife</h1>
+          <p id="status">Choose a house in the square.</p>
+        </div>
+        <div id="controls">WASD to move, mouse/touch to look, E to interact.</div>
+      </div>
+      <canvas id="game"></canvas>
+      <div id="overlay" class="overlay hidden">
+        <div class="overlay-card">
+          <h2>Select a house</h2>
+          <p>Pick one of three homes to start your life here.</p>
+          <div class="house-row">
+            <button class="house-btn" data-house="0">House A</button>
+            <button class="house-btn" data-house="1">House B</button>
+            <button class="house-btn" data-house="2">House C</button>
+          </div>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
