@@ -28,6 +28,7 @@ let selectedHouse = null;
 let player = { x: 60, y: 74, speed: 0.16 };
 let keys = {};
 let npcTalk = '';
+let keyLatch = {};
 let npcs = [];
 let pointerLocked = false;
 let lookOffset = 0;
@@ -233,13 +234,15 @@ function updateTown() {
   player.x = clamp(player.x + (move.x / mag) * player.speed * 1.8, 16, 104);
   player.y = clamp(player.y + (move.y / mag) * player.speed * 1.8, 44, 104);
 
-  if (keys.KeyE) {
+  if (keys.KeyE && !keyLatch.KeyE) {
+    keyLatch.KeyE = true;
     const hit = houseDefs.findIndex((h) => Math.hypot(player.x - (h.x + h.w / 2), player.y - (h.y + h.h / 2)) < 8);
     if (hit >= 0) enterHouse(hit);
   }
 
   const nearby = npcs.find((npc) => Math.hypot(player.x - npc.x, player.y - npc.y) < 8);
-  if (nearby && keys.KeyN) {
+  if (nearby && keys.KeyN && !keyLatch.KeyN) {
+    keyLatch.KeyN = true;
     npcTalk = `${nearby.name}: ${nearby.talk}`;
     statusEl.textContent = npcTalk;
   } else if (!nearby && !npcTalk) {
@@ -256,7 +259,10 @@ function updateHouse() {
   const mag = Math.hypot(move.x, move.y) || 1;
   player.x = clamp(player.x + (move.x / mag) * player.speed * 1.6, 12, 108);
   player.y = clamp(player.y + (move.y / mag) * player.speed * 1.6, 18, 108);
-  if (keys.KeyE) leaveHouse();
+  if (keys.KeyE && !keyLatch.KeyE) {
+    keyLatch.KeyE = true;
+    leaveHouse();
+  }
 }
 
 function loop() {
@@ -297,6 +303,7 @@ document.addEventListener('keydown', (event) => {
 });
 document.addEventListener('keyup', (event) => {
   keys[event.code] = false;
+  keyLatch[event.code] = false;
 });
 
 document.addEventListener('mousemove', (event) => {
