@@ -7,10 +7,11 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
 #app { position: relative; width: 100vw; height: 100vh; }
-#game { width: 100%; height: 100%; display: block; touch-action: none; }
+#game { width: 100%; height: 100%; display: block; touch-action: none; background: linear-gradient(#bfe7ff 0%, #d7f3ff 42%, #83be6a 42%, #83be6a 100%); }
 #hud {
   position: absolute; top: 10px; left: 10px; right: 10px; z-index: 5;
   display: flex; justify-content: space-between; gap: 12px; pointer-events: none;
+  align-items: flex-start;
 }
 #hud h1 { margin: 0; font-size: clamp(1.4rem, 3vw, 2.3rem); text-shadow: 0 2px 0 #000; }
 #hud p, #controls { margin: 4px 0 0; font-size: .9rem; color: #d5dcff; text-shadow: 0 1px 0 #000; }
@@ -34,3 +35,5 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
   #hud { flex-direction: column; }
   .house-row { grid-template-columns: 1fr; }
 }
+
+#status { max-width: 50vw; }
